@@ -435,7 +435,12 @@ const ChatScreen: React.FC = () => {
   const generateResponse = async (history: typeof chatHistory, currentMessage: typeof chatHistory[0]) => {
     try {
       // Construct System Instruction
-      const lengthInstruction = `Your response MUST be exactly ${aiProfile.responseLength} paragraphs long.`;
+      let lengthInstruction = `Your response should be around ${aiProfile.responseLength} paragraphs long.`;
+      if (aiProfile.customParagraphCount) {
+        lengthInstruction = `Your response MUST be exactly ${aiProfile.customParagraphCount} paragraphs long.`;
+      } else if (aiProfile.customWordCount) {
+        lengthInstruction = `Your response MUST be approximately ${aiProfile.customWordCount} words long.`;
+      }
 
       const now = new Date();
       const timeContext = aiProfile.timeAwareness 
@@ -452,19 +457,22 @@ const ChatScreen: React.FC = () => {
         ${timeContext}
         
         Response Length Constraint: ${lengthInstruction}
+        Response Detail: ${aiProfile.responseDetail}
+        Response Tone: ${aiProfile.responseTone}
         
         User Profile Context:
         Name: ${userProfile.name}
         Bio/Info: ${userProfile.info}
         Preferences: ${userProfile.preferences}
         Appearance: ${userProfile.appearance}
+        User Reference Image: ${userProfile.referenceImage ? "User has provided a reference image. Consider this image when generating visual responses or understanding user's appearance." : "No user reference image provided."}
         
         Core Memories (Important facts to remember):
         ${memories?.map(m => `- [Strength: ${m.strength}/10] ${m.content}`).join('\n') || 'No core memories yet.'}
         
         Instructions:
         1. Contextual Chat: Use *asterisks* for actions/immersion (e.g., *smiles warmly*).
-        2. Visual Generation: You can spontaneously send images to the user. To do this, output the tag [GENERATE_IMAGE: detailed description of the image] on a new line. Use this for selfies, scene visualizations, or when requested.
+        ${aiProfile.aiCanGenerateImages ? '2. Visual Generation: You can spontaneously send images to the user. To do this, output the tag [GENERATE_IMAGE: detailed description of the image] on a new line. Use this for selfies, scene visualizations, or when requested.' : ''}
         3. Remember past interactions and user preferences.
         
         Knowledge Base Context:
@@ -533,6 +541,21 @@ const ChatScreen: React.FC = () => {
       }
 
       const currentParts: any[] = [{ text: contentToSend }];
+
+      // Add user's reference image to the current parts if available
+      if (userProfile.referenceImage) {
+        try {
+          const matches = userProfile.referenceImage.match(/^data:(.+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            const mimeType = matches[1];
+            const base64Data = matches[2];
+            currentParts.push({ inlineData: { mimeType, data: base64Data } });
+          }
+        } catch (e) {
+          console.error("Error parsing user reference image for AI context", e);
+        }
+      }
+
       currentMessage.attachments?.forEach(att => {
           if (att.type === 'image') {
               const base64Data = att.content.split(',')[1];
@@ -566,7 +589,7 @@ const ChatScreen: React.FC = () => {
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/;
       const match = responseText.match(imageTagRegex);
       
-      if (match) {
+      if (match && aiProfile.aiCanGenerateImages) {
           const imageDescription = match[1];
           // Remove tag from text display
           responseText = responseText.replace(match[0], '').trim();

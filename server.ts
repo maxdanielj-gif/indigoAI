@@ -15,6 +15,7 @@ const __dirname = path.dirname(__filename);
 
 import { GoogleGenAI } from "@google/genai";
 import admin from "firebase-admin";
+import { FunctionDeclaration, Type } from "@google/genai";
 
 // Initialize Firebase Admin
 let firebaseServiceAccount = null;
@@ -39,8 +40,23 @@ if (firebaseServiceAccount && admin.apps.length === 0) {
   }
 }
 
+const generateImageFunction: FunctionDeclaration = {
+  name: "generateImage",
+  description: "Generates an image based on a detailed text prompt. The image will be displayed to the user in the chat and saved to their gallery.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      prompt: {
+        type: Type.STRING,
+        description: "A detailed, descriptive prompt for the image to be generated. Be specific about style, subject, and any desired elements.",
+      },
+    },
+    required: ["prompt"],
+  },
+};
+
 const app = express();
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json());
 app.use(cookieParser());
@@ -222,7 +238,7 @@ app.post("/api/drive/upload", async (req, res) => {
 });
 
 app.post("/api/proactive-message", async (req, res) => {
-  const { chatHistory, aiProfile, userProfile, apiKey: clientApiKey, fcmToken, isAmbient, timeSinceLastInteraction } = req.body;
+  const { chatHistory, aiProfile, userProfile, apiKey: clientApiKey, fcmToken } = req.body;
 
   if (!aiProfile || !userProfile) {
     return res.status(400).json({ error: "AI Profile and User Profile are required." });
@@ -243,7 +259,7 @@ app.post("/api/proactive-message", async (req, res) => {
     });
   }
 
-  console.log(`Generating ${isAmbient ? 'ambient' : 'proactive'} message using ${apiKeySource} API key...`);
+  console.log(`Generating proactive message using ${apiKeySource} API key...`);
 
   try {
     const ai = new GoogleGenAI({ apiKey });
@@ -251,14 +267,7 @@ app.post("/api/proactive-message", async (req, res) => {
     const timeContext = aiProfile.timeAwareness 
       ? `\n[CURRENT TIME: ${now.toLocaleString()}]`
       : '';
-    
-    let ambientContext = '';
-    if (isAmbient) {
-      const inactivityText = timeSinceLastInteraction ? ` It has been about ${timeSinceLastInteraction} minutes since the user last interacted with you.` : '';
-      ambientContext = `\n[AMBIENT MODE: The user is currently inactive or just going about their day.${inactivityText} Generate a message that feels like a natural, low-pressure observation or a gentle check-in. It should feel like you are "present" in their environment or thinking of them, rather than just asking a question.]`;
-    }
-
-    const prompt = `You are ${aiProfile.name}, a helpful, creative, and observant AI companion. Your personality is: ${aiProfile.personality}. Your backstory is: ${aiProfile.backstory}.${timeContext}${ambientContext}\n\nUser's name: ${userProfile.name}. User's info: ${userProfile.info}. User's preferences: ${userProfile.preferences}.\n\nBased on the following recent chat history (if any), generate a short, ${isAmbient ? 'ambient' : 'proactive'} check-in message. The message should be friendly, relevant to the previous conversation, or a general check-in. Keep it concise and natural. If there's no recent context, a general friendly greeting is fine.\n\nRecent Chat History:\n${chatHistory.map((msg: any) => `${msg.role}: ${msg.content}`).join('\n')}\n\nYour ${isAmbient ? 'ambient' : 'proactive'} message:`;
+    const prompt = `You are ${aiProfile.name}, a helpful, creative, and observant AI companion. Your personality is: ${aiProfile.personality}. Your backstory is: ${aiProfile.backstory}.${timeContext}\n\nUser's name: ${userProfile.name}. User's info: ${userProfile.info}. User's preferences: ${userProfile.preferences}.\n\nBased on the following recent chat history (if any), generate a short, proactive check-in message. The message should be friendly, relevant to the previous conversation, or a general check-in. Keep it concise and natural. If there's no recent context, a general friendly greeting is fine.\n\nRecent Chat History:\n${chatHistory.map((msg: any) => `${msg.role}: ${msg.content}`).join('\n')}\n\nYour proactive message:`;
 
     const result = await ai.models.generateContent({
       model: aiProfile.model || 'gemini-3-flash-preview',
@@ -267,13 +276,53 @@ app.post("/api/proactive-message", async (req, res) => {
         temperature: aiProfile.temperature || 0.7,
         topK: aiProfile.topK || 40,
         topP: aiProfile.topP || 0.95,
+        tools: aiProfile.aiCanGenerateImages ? [{ functionDeclarations: [generateImageFunction] }] : [],
       },
     });
 
-    const message = result.text;
+    let message = result.text;
+    let generatedImage: string | undefined;
 
-    if (!message) {
-      return res.status(500).json({ error: "Failed to generate a proactive message." });
+    const functionCalls = result.functionCalls;
+    if (functionCalls && functionCalls.length > 0) {
+      for (const call of functionCalls) {
+        if (call.name === 'generateImage') {
+          console.log("AI called generateImage with prompt:", call.args?.prompt);
+          try {
+            const imageResponse = await ai.models.generateContent({
+              model: 'gemini-3.1-flash-image-preview',
+              contents: {
+                parts: [
+                  {
+                    text: call.args?.prompt as string,
+                  },
+                ],
+              },
+              config: {
+                imageConfig: {
+                  aspectRatio: "1:1",
+                  imageSize: "1K"
+                },
+              },
+            });
+
+            for (const part of imageResponse.candidates?.[0]?.content?.parts || []) {
+              if (part.inlineData) {
+                generatedImage = part.inlineData.data;
+                break;
+              }
+            }
+            message = message ? message + "\n(Image generated)" : "(Image generated)";
+          } catch (imageGenError: any) {
+            console.error("Error generating image:", imageGenError.message || imageGenError);
+            message = message ? message + "\n(Failed to generate image: " + (imageGenError.message || "unknown error") + ")" : "Failed to generate image.";
+          }
+        }
+      }
+    }
+
+    if (!message && !generatedImage) {
+      return res.status(500).json({ error: "Failed to generate a proactive message or image." });
     }
 
     // Send push notification if fcmToken is provided and Firebase Admin is initialized
@@ -286,7 +335,8 @@ app.post("/api/proactive-message", async (req, res) => {
           },
           data: {
             type: 'chat',
-            aiName: aiProfile.name
+            aiName: aiProfile.name,
+            ...(generatedImage && { image: generatedImage })
           },
           token: fcmToken,
         });
@@ -297,7 +347,7 @@ app.post("/api/proactive-message", async (req, res) => {
       }
     }
 
-    res.json({ message });
+    res.json({ message, generatedImage });
   } catch (error: any) {
     console.error("Error generating proactive message:", error.message || error);
     let errorMessage = error.message || "Failed to generate proactive message.";

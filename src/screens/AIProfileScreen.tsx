@@ -4,7 +4,8 @@ import { Upload, Plus, Save, Trash2, Users, Play, Download } from 'lucide-react'
 import { GoogleGenAI } from "@google/genai";
 
 const AIProfileScreen: React.FC = () => {
-  const { aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, apiKey } = useApp();
+  const { aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, apiKey, setAmbientMode, setAmbientFrequency } = useApp();
+  console.log('AIProfileScreen rendering, aiProfile:', aiProfile);
   const [name, setName] = useState(aiProfile.name);
   const [personality, setPersonality] = useState(aiProfile.personality);
   const [backstory, setBackstory] = useState(aiProfile.backstory);
@@ -15,6 +16,10 @@ const AIProfileScreen: React.FC = () => {
   const [autoReadMessages, setAutoReadMessages] = useState(aiProfile.autoReadMessages || false);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female' | 'none'>(aiProfile.voiceGender || 'none');
   const [responseLength, setResponseLength] = useState<number>(aiProfile.responseLength || 2); // Paragraphs
+  const [responseDetail, setResponseDetail] = useState<AIProfile['responseDetail']>(aiProfile.responseDetail || 'Standard');
+  const [responseTone, setResponseTone] = useState<AIProfile['responseTone']>(aiProfile.responseTone || 'Neutral');
+  const [customParagraphCount, setCustomParagraphCount] = useState<number | null>(aiProfile.customParagraphCount || null);
+  const [customWordCount, setCustomWordCount] = useState<number | null>(aiProfile.customWordCount || null);
   const [customStyle, setCustomStyle] = useState('');
   const [proactiveMessageFrequency, setProactiveMessageFrequency] = useState<AIProfile['proactiveMessageFrequency']>(aiProfile.proactiveMessageFrequency || 'off');
   const [model, setModel] = useState(aiProfile.model || 'gemini-3.1-pro-preview');
@@ -22,6 +27,9 @@ const AIProfileScreen: React.FC = () => {
   const [topK, setTopK] = useState(aiProfile.topK || 40);
   const [topP, setTopP] = useState(aiProfile.topP || 0.95);
   const [timeAwareness, setTimeAwareness] = useState<boolean>(aiProfile.timeAwareness ?? true);
+  const [ambientModeState, setAmbientModeState] = useState<boolean>(aiProfile.ambientMode ?? false);
+  const [ambientFrequencyState, setAmbientFrequencyState] = useState<AIProfile['ambientFrequency']>(aiProfile.ambientFrequency || 'off');
+  const [aiCanGenerateImagesState, setAiCanGenerateImagesState] = useState<boolean>(aiProfile.aiCanGenerateImages ?? false);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [referenceImage, setReferenceImage] = useState<string | null>(aiProfile.referenceImage);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
@@ -124,6 +132,9 @@ const AIProfileScreen: React.FC = () => {
     setTopK(aiProfile.topK || 40);
     setTopP(aiProfile.topP || 0.95);
     setTimeAwareness(aiProfile.timeAwareness !== undefined ? aiProfile.timeAwareness : true);
+    setAmbientModeState(aiProfile.ambientMode ?? false);
+    setAmbientFrequencyState(aiProfile.ambientFrequency || 'off');
+    setAiCanGenerateImagesState(aiProfile.aiCanGenerateImages ?? false);
   }, [aiProfile]);
 
   React.useEffect(() => {
@@ -157,6 +168,9 @@ const AIProfileScreen: React.FC = () => {
       topK,
       topP,
       timeAwareness,
+      ambientMode: ambientModeState,
+      ambientFrequency: ambientFrequencyState,
+      aiCanGenerateImages: aiCanGenerateImagesState,
     };
     savePersona(updatedProfile);
     alert('AI Persona saved!');
@@ -184,6 +198,9 @@ const AIProfileScreen: React.FC = () => {
       topK: aiProfile.topK,
       topP: aiProfile.topP,
       timeAwareness,
+      ambientMode: aiProfile.ambientMode,
+      ambientFrequency: aiProfile.ambientFrequency,
+      aiCanGenerateImages: aiProfile.aiCanGenerateImages,
     };
     savePersona(newProfile);
     loadPersona(newId); // Switch to new persona
@@ -220,6 +237,7 @@ const AIProfileScreen: React.FC = () => {
         timeAwareness: true,
         ambientMode: false,
         ambientFrequency: 'off',
+        aiCanGenerateImages: false,
     };
     savePersona(newProfile);
     loadPersona(newId);
@@ -500,6 +518,65 @@ const AIProfileScreen: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Response Detail</label>
+                        <select
+                            value={responseDetail}
+                            onChange={(e) => setResponseDetail(e.target.value as AIProfile['responseDetail'])}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="Concise">Concise</option>
+                            <option value="Standard">Standard</option>
+                            <option value="Detailed">Detailed</option>
+                            <option value="Verbose">Verbose</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Response Tone</label>
+                        <select
+                            value={responseTone}
+                            onChange={(e) => setResponseTone(e.target.value as AIProfile['responseTone'])}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                            <option value="Neutral">Neutral</option>
+                            <option value="Serious">Serious</option>
+                            <option value="Humorous">Humorous</option>
+                            <option value="Professional">Professional</option>
+                            <option value="Flirty">Flirty</option>
+                            <option value="Empathetic">Empathetic</option>
+                            <option value="Sarcastic">Sarcastic</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Custom Paragraph Count</label>
+                        <input
+                            type="number"
+                            min="1"
+                            max="20"
+                            value={customParagraphCount ?? ''}
+                            onChange={(e) => setCustomParagraphCount(e.target.value ? parseInt(e.target.value) : null)}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            placeholder="e.g., 3 (overrides Response Length)"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Custom Word Count</label>
+                        <input
+                            type="number"
+                            min="10"
+                            max="500"
+                            value={customWordCount ?? ''}
+                            onChange={(e) => setCustomWordCount(e.target.value ? parseInt(e.target.value) : null)}
+                            className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                            placeholder="e.g., 150 (overrides Response Length)"
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Response Length (Paragraphs)</label>
                         <input
                             type="number"
@@ -518,14 +595,55 @@ const AIProfileScreen: React.FC = () => {
                             className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         >
                             <option value="off">Off</option>
-                            <option value="very_frequently">Very Frequently (Demo: ~1 min)</option>
-                            <option value="frequently">Frequently (~1 hour)</option>
-                            <option value="occasionally">Occasionally (~6 hours)</option>
-                            <option value="rarely">Rarely (~24 hours)</option>
+                            <option value="very_frequently">Very Frequently (approx. 1 min)</option>
+                            <option value="frequently">Frequently (approx. 1 hour)</option>
+                            <option value="occasionally">Occasionally (approx. 6 hours)</option>
+                            <option value="rarely">Rarely (approx. 24 hours)</option>
                         </select>
                         <p className="text-xs text-gray-500 mt-1">
                             Allow AI to send check-in notifications.
                         </p>
+                    </div>
+                </div>
+
+                <div className="border-t border-gray-100 pt-4">
+                    <h3 className="text-sm font-semibold text-gray-900 mb-3">Ambient Mode Settings</h3>
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between">
+                            <label htmlFor="ambientMode" className="block text-sm font-medium text-gray-700">Enable Ambient Mode</label>
+                            <button 
+                                onClick={() => setAmbientModeState(!ambientModeState)}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${ambientModeState ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${ambientModeState ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </button>
+                        </div>
+                        {ambientModeState && (
+                            <div className="mt-3">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Ambient Frequency</label>
+                                <select
+                                    value={ambientFrequencyState}
+                                    onChange={(e) => setAmbientFrequencyState(e.target.value as any)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="off">Off</option>
+                                    <option value="very_frequently">Very Frequently (Demo: ~1 min)</option>
+                                    <option value="frequently">Frequently (~1 hour)</option>
+                                    <option value="occasionally">Occasionally (~6 hours)</option>
+                                    <option value="rarely">Rarely (~24 hours)</option>
+                                </select>
+                            </div>
+                        )}
+
+                        <div className="flex items-center justify-between">
+                            <label htmlFor="aiCanGenerateImages" className="block text-sm font-medium text-gray-700">AI Can Generate Images</label>
+                            <button 
+                                onClick={() => setAiCanGenerateImagesState(!aiCanGenerateImagesState)}
+                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${aiCanGenerateImagesState ? 'bg-indigo-600' : 'bg-gray-200'}`}
+                            >
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiCanGenerateImagesState ? 'translate-x-6' : 'translate-x-1'}`} />
+                            </button>
+                        </div>
                     </div>
                 </div>
 

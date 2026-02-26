@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { saveToDB, loadFromDB, clearDB } from '../services/db';
 import { onForegroundMessage, requestNotificationPermission, showNativeNotification } from '../services/firebaseService';
+import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
 
 // Types
 export interface AIProfile {
@@ -18,6 +19,10 @@ export interface AIProfile {
   responseStyle: string;
   proactiveMessageFrequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off';
   responseLength: number; // Measured in number of paragraphs
+  responseDetail: 'Concise' | 'Standard' | 'Detailed' | 'Verbose';
+  responseTone: 'Neutral' | 'Serious' | 'Humorous' | 'Professional' | 'Flirty' | 'Empathetic' | 'Sarcastic';
+  customParagraphCount: number | null;
+  customWordCount: number | null;
   model?: string;
   temperature?: number;
   topK?: number;
@@ -25,13 +30,30 @@ export interface AIProfile {
   timeAwareness: boolean;
   ambientMode: boolean;
   ambientFrequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off';
+  aiCanGenerateImages: boolean;
 }
+
+const generateImageFunction: FunctionDeclaration = {
+  name: "generateImage",
+  description: "Generates an image based on a detailed text prompt. The image will be displayed to the user in the chat and saved to their gallery.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      prompt: {
+        type: Type.STRING,
+        description: "A detailed, descriptive prompt for the image to be generated. Be specific about style, subject, and any desired elements.",
+      },
+    },
+    required: ["prompt"],
+  },
+};
 
 export interface UserProfile {
   name: string;
   info: string;
   preferences: string;
   appearance: string;
+  referenceImage: string | null; // Base64 encoded image for AI to 'see'
 }
 
 export interface ChatMessage {
@@ -98,6 +120,7 @@ interface AppState {
   showTimestamps: boolean;
   ambientMode: boolean;
   ambientFrequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off';
+  aiCanGenerateImages: boolean;
 }
 
 interface AppContextType extends AppState {
@@ -106,6 +129,7 @@ interface AppContextType extends AppState {
   deletePersona: (id: string) => void;
   loadPersona: (id: string) => void;
   setUserProfile: (profile: UserProfile) => void;
+  setUserReferenceImage: (image: string | null) => void;
   setFcmToken: (token: string | null) => void;
   addChatMessage: (message: ChatMessage) => void;
   updateChatMessage: (id: string, newContent: string) => void;
@@ -138,6 +162,9 @@ interface AppContextType extends AppState {
   setNotificationsEnabled: (enabled: boolean) => void;
   setShowTimestamps: (show: boolean) => void;
   setProactiveMessageFrequency: (frequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off') => void;
+  setAmbientMode: (enabled: boolean) => void;
+  setAmbientFrequency: (frequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off') => void;
+  setAiCanGenerateImages: (enabled: boolean) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -167,6 +194,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     timeAwareness: true,
     ambientMode: false,
     ambientFrequency: 'off',
+    aiCanGenerateImages: false,
   });
 
   const [savedPersonas, setSavedPersonas] = useState<AIProfile[]>([]);
@@ -176,6 +204,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     info: '',
     preferences: '',
     appearance: '',
+    referenceImage: null,
   });
 
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -212,14 +241,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     voiceSpeed: 1.0,
     autoReadMessages: false,
     voiceGender: 'none',
-    responseStyle: 'Detailed',
+    responseStyle: 'Standard',
     responseLength: 2,
+    responseDetail: 'Standard',
+    responseTone: 'Neutral',
+    customParagraphCount: null,
+    customWordCount: null,
     proactiveMessageFrequency: 'off',
     model: 'gemini-3.1-pro-preview',
     temperature: 0.7,
     topK: 40,
     topP: 0.95,
     timeAwareness: true,
+    ambientMode: false,
+    ambientFrequency: 'off',
+    aiCanGenerateImages: false,
   };
 
   const initialUserProfileState: UserProfile = {
@@ -270,7 +306,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 const loadedProfile = savedData.aiProfile || initialAIProfileState;
                 if (!loadedProfile.id) loadedProfile.id = 'default';
                 
-                setAIProfileState(loadedProfile);
+                setAIProfileState(prev => ({
+            ...initialAIProfileState, // Provide defaults for new fields
+            ...loadedProfile,
+            ambientMode: loadedProfile.ambientMode ?? false,
+            ambientFrequency: loadedProfile.ambientFrequency || 'off',
+            aiCanGenerateImages: loadedProfile.aiCanGenerateImages ?? false,
+          }));
                 setSavedPersonas(savedData.savedPersonas || [loadedProfile]);
                 setUserProfileState(savedData.userProfile || initialUserProfileState);
                 setChatHistory(Array.isArray(savedData.chatHistory) ? savedData.chatHistory : []);
@@ -316,41 +358,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkDriveStatus();
   }, []);
 
-  // Save to IndexedDB on change (debounced)
-  useEffect(() => {
+  const saveData = useCallback(async () => {
     if (!isLoaded) return; // Don't save before initial load is complete
 
-    const saveData = async () => {
-        try {
-            const data: AppState = {
-                aiProfile,
-                savedPersonas,
-                userProfile,
-                chatHistory,
-                gallery,
-                journal,
-                knowledgeBase,
-                memories,
-                toasts: [],
-                apiKey,
-                autoSaveChat,
-                autoSaveChatInterval,
-                autoJsonBackup,
-                autoJsonBackupInterval,
-                autoDriveBackup,
-                isGoogleDriveConnected,
-                proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
-                notificationsEnabled,
-                fcmToken,
-                showTimestamps,
-            };
-            await saveToDB('indigo_app_data', data);
-        } catch (e) {
-            console.error("Failed to save data to DB", e);
-        }
-    };
+    try {
+      const data: AppState = {
+          aiProfile,
+          savedPersonas,
+          userProfile,
+          chatHistory,
+          gallery,
+          journal,
+          knowledgeBase,
+          memories,
+          toasts: [],
+          apiKey,
+          autoSaveChat,
+          autoSaveChatInterval,
+          autoJsonBackup,
+          autoJsonBackupInterval,
+          autoDriveBackup,
+          isGoogleDriveConnected,
+          proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
+          notificationsEnabled,
+          fcmToken,
+          showTimestamps,
+          ambientMode: aiProfile.ambientMode,
+          ambientFrequency: aiProfile.ambientFrequency,
+          aiCanGenerateImages: aiProfile.aiCanGenerateImages,
+      };
+      await saveToDB('indigo_app_data', data);
+    } catch (e) {
+      console.error("Failed to save data to DB", e);
+    }
 
     // Debounce save to avoid excessive writes
+  }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
+
+  // Debounce save to avoid excessive writes
+  useEffect(() => {
+    if (!isLoaded) return;
     const timeoutId = setTimeout(saveData, 1000);
     return () => clearTimeout(timeoutId);
   }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
@@ -390,12 +437,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       // Optionally add to chat history if it's a chat message
       if (payload.data?.type === 'chat') {
-        addChatMessage({
-          id: `fcm-${Date.now()}`,
-          role: 'model',
-          content: body,
-          timestamp: Date.now(),
-        });
+        const imageBase64 = payload.data?.image;
+        if (imageBase64) {
+          const imageUrl = `data:image/png;base64,${imageBase64}`;
+          addToGallery({
+            id: `generated-${Date.now()}`,
+            type: 'generated',
+            url: imageUrl,
+            prompt: body, // Use notification body as prompt for context
+            timestamp: Date.now(),
+          });
+          addChatMessage({
+            id: `fcm-${Date.now()}`,
+            role: 'model',
+            content: body,
+            timestamp: Date.now(),
+            attachments: [{ type: 'image', content: imageUrl, name: 'Generated Image' }]
+          });
+        } else {
+          addChatMessage({
+            id: `fcm-${Date.now()}`,
+            role: 'model',
+            content: body,
+            timestamp: Date.now(),
+          });
+        }
       }
     });
 
@@ -432,6 +498,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 notificationsEnabled,
                 fcmToken,
                 showTimestamps,
+                ambientMode: aiProfile.ambientMode,
+                ambientFrequency: aiProfile.ambientFrequency,
+                aiCanGenerateImages: aiProfile.aiCanGenerateImages,
             };
             await saveToDB('indigo_app_data', data);
             console.log(`Auto-saved chat history (${autoSaveChatInterval}s interval)`);
@@ -467,6 +536,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 isGoogleDriveConnected,
                 proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
                 notificationsEnabled,
+                aiCanGenerateImages: aiProfile.aiCanGenerateImages,
             }, null, 2);
             
             const now = new Date();
@@ -580,11 +650,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
 
           if (res.ok) {
-            const { message } = await res.json();
+            const { message, generatedImage } = await res.json();
             
-            // After sending the proactive message via FCM (handled server-side),
-            // we don't need to display it in-app unless the FCM fails or is not enabled.
-            // The onForegroundMessage listener will handle displaying it as a toast if the app is in foreground.
+            if (generatedImage) {
+              const imageUrl = `data:image/png;base64,${generatedImage}`;
+              addToGallery({
+                id: `generated-${Date.now()}`,
+                type: 'generated',
+                url: imageUrl,
+                prompt: message || "AI generated image",
+                timestamp: Date.now(),
+              });
+              addChatMessage({
+                id: `proactive-${Date.now()}`,
+                role: 'model',
+                content: message || "Here's an image I thought you'd like!",
+                timestamp: Date.now(),
+                attachments: [{ type: 'image', content: imageUrl, name: 'Generated Image' }]
+              });
+            } else if (message) {
+              // If no image, but there's a message, add it to chat
+              addChatMessage({
+                id: `proactive-${Date.now()}`,
+                role: 'model',
+                content: message,
+                timestamp: Date.now(),
+              });
+            }
             
             setLastInteractionTime(Date.now());
           } else {
@@ -639,23 +731,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setAIProfileState(remaining[0]);
         } else {
             // Reset to default if no personas left
-            setAIProfileState({
-                id: 'default',
-                name: 'Indigo',
-                personality: 'Helpful, creative, and observant.',
-                backstory: 'I am an AI companion created to assist and inspire.',
-                appearance: 'A digital entity with a calming indigo aura.',
-                referenceImage: null,
-                voiceURI: null,
-                voicePitch: 1.0,
-                voiceSpeed: 1.0,
-                autoReadMessages: false,
-                voiceGender: 'none',
-                responseStyle: 'Detailed',
-                responseLength: 2,
-                proactiveMessageFrequency: 'off',
-                timeAwareness: true,
-            });
+            setAIProfileState(initialAIProfileState);
         }
     }
   };
@@ -668,6 +744,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const setUserProfile = (profile: UserProfile) => setUserProfileState(profile);
+
+  const setUserReferenceImage = (image: string | null) => {
+    setUserProfileState(prev => ({ ...prev, referenceImage: image }));
+    saveData();
+  };
   
   const addChatMessage = (message: ChatMessage) => {
     setChatHistory(prev => [...prev, message]);
@@ -759,6 +840,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
       notificationsEnabled,
       showTimestamps,
+      aiCanGenerateImages: aiProfile.aiCanGenerateImages,
     }, null, 2);
   };
 
@@ -782,6 +864,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setProactiveMessageFrequency(parsed.proactiveMessageFrequency !== undefined ? parsed.proactiveMessageFrequency : 'off');
       setNotificationsEnabledState(parsed.notificationsEnabled !== undefined ? parsed.notificationsEnabled : (typeof Notification !== 'undefined' && Notification.permission === 'granted'));
       setShowTimestampsState(parsed.showTimestamps !== undefined ? parsed.showTimestamps : true);
+      setAIProfileState(prev => ({
+        ...parsed.aiProfile || prev,
+        ambientMode: parsed.aiProfile?.ambientMode ?? false,
+        ambientFrequency: parsed.aiProfile?.ambientFrequency || 'off',
+        aiCanGenerateImages: parsed.aiProfile?.aiCanGenerateImages ?? false,
+      }));
     } catch (e) {
       console.error("Invalid JSON data", e);
       addToast({ title: "Import Failed", message: "Failed to import data. Invalid JSON.", type: "error" });
@@ -810,7 +898,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setAutoSaveChatInterval(30);
           setAutoJsonBackupState(false);
           setAutoJsonBackupInterval(5);
-          setAIProfileState(prev => ({ ...prev, proactiveMessageFrequency: 'off', timeAwareness: true }));
+          setAIProfileState(prev => ({ ...prev, proactiveMessageFrequency: 'off', timeAwareness: true, ambientMode: false, ambientFrequency: 'off' }));
           setShowTutorial(false);
           setShowTimestampsState(true);
           window.location.reload();
@@ -824,7 +912,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider value={{
       aiProfile, setAIProfile, savePersona, deletePersona, loadPersona,
       savedPersonas,
-      userProfile, setUserProfile,
+      userProfile, setUserProfile, setUserReferenceImage,
       chatHistory, addChatMessage, updateChatMessage, deleteChatMessage, setChatHistory,
       gallery, addToGallery, deleteImageFromGallery,
       journal, addJournalEntry, updateJournalEntry, deleteJournalEntry,
@@ -844,6 +932,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isGoogleDriveConnected, setIsGoogleDriveConnected,
       showTimestamps, setShowTimestamps: setShowTimestampsState,
       proactiveMessageFrequency: aiProfile.proactiveMessageFrequency, setProactiveMessageFrequency,
+      ambientMode: aiProfile.ambientMode, setAmbientMode: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, ambientMode: enabled })),
+      ambientFrequency: aiProfile.ambientFrequency, setAmbientFrequency: (frequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off') => setAIProfileState(prev => ({ ...prev, ambientFrequency: frequency })),
+      aiCanGenerateImages: aiProfile.aiCanGenerateImages, setAiCanGenerateImages: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, aiCanGenerateImages: enabled })),
     }}>
       {children}
     </AppContext.Provider>

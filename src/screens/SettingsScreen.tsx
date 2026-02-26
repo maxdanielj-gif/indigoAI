@@ -628,26 +628,7 @@ const SettingsScreen: React.FC = () => {
                 </div>
 
 
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center">
-                        <Bell className="w-5 h-5 text-gray-500 mr-3" />
-                        <div>
-                            <span className="text-gray-700 block">Proactive Messages</span>
-                            <span className="text-xs text-gray-500">AI will send check-in messages based on this frequency.</span>
-                        </div>
-                    </div>
-                    <select
-                        value={proactiveMessageFrequency}
-                        onChange={(e) => setProactiveMessageFrequency(e.target.value as 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off')}
-                        className="w-36 border border-gray-300 rounded-md shadow-sm py-1 px-2 text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                        <option value="off">Off</option>
-                        <option value="rarely">Rarely</option>
-                        <option value="occasionally">Occasionally</option>
-                        <option value="frequently">Frequently</option>
-                        <option value="very_frequently">Very Frequently</option>
-                    </select>
-                </div>
+
 
                 <div className="flex items-center justify-between">
                     <div className="flex items-center">
