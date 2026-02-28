@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { Download, Trash2, Copy, Upload } from 'lucide-react';
 
 const GalleryScreen: React.FC = () => {
-  const { gallery, deleteImageFromGallery, addToGallery } = useApp();
+  const { gallery, deleteImageFromGallery, addToGallery, timeZone } = useApp();
   const [activeTab, setActiveTab] = useState<'generated' | 'uploaded'>('generated');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,11 +120,16 @@ const GalleryScreen: React.FC = () => {
                         </button>
                     )}
                 </div>
-                {item.prompt && (
-                    <div className="p-2 text-gray-700 text-xs truncate">
-                        {item.prompt}
-                    </div>
-                )}
+                <div className="px-2 pb-2 flex justify-between items-center bg-gray-50">
+                    <span className="text-[10px] text-gray-400">
+                        {new Date(item.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone })}
+                    </span>
+                    {item.prompt && (
+                        <div className="text-gray-700 text-[10px] truncate max-w-[100px]">
+                            {item.prompt}
+                        </div>
+                    )}
+                </div>
             </div>
           ))}
         </div>

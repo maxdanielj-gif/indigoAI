@@ -4,13 +4,15 @@ import { Trash2, Edit, Save, XCircle, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const MemoryScreen: React.FC = () => {
-  const { memories, updateMemory, deleteMemory, addToast } = useApp();
+  const { memories, updateMemory, deleteMemory, addToast, timeZone } = useApp();
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
+  const [editedStrength, setEditedStrength] = useState(5);
 
-  const handleEditClick = (memoryId: string, content: string) => {
+  const handleEditClick = (memoryId: string, content: string, strength: number) => {
     setEditingMemoryId(memoryId);
     setEditedContent(content);
+    setEditedStrength(strength);
   };
 
   const handleSaveEdit = (memoryId: string) => {
@@ -18,7 +20,10 @@ const MemoryScreen: React.FC = () => {
       addToast({ title: "Error", message: "Memory content cannot be empty.", type: "error" });
       return;
     }
-    updateMemory(memoryId, { content: editedContent.trim() });
+    updateMemory(memoryId, { 
+      content: editedContent.trim(),
+      strength: editedStrength
+    });
     setEditingMemoryId(null);
     setEditedContent('');
     addToast({ title: "Memory Updated", message: "Memory updated successfully.", type: "success" });
@@ -60,9 +65,25 @@ const MemoryScreen: React.FC = () => {
               className="bg-gray-50 p-4 rounded-lg border border-gray-200 shadow-sm"
             >
               <div className="flex justify-between items-start mb-2">
-                <p className="text-xs text-gray-500">
-                  Strength: {memory.strength}/10 | Last Accessed: {new Date(memory.lastAccessed).toLocaleString()}
-                </p>
+                  <div className="flex flex-col">
+                    <p className="text-xs text-gray-500">
+                      Strength: {memory.strength}/10 | Last Accessed: {new Date(memory.lastAccessed).toLocaleString([], { dateStyle: 'short', timeStyle: 'short', timeZone })}
+                    </p>
+                    {editingMemoryId === memory.id && (
+                      <div className="mt-2 flex items-center gap-3">
+                        <label className="text-xs font-medium text-gray-700">Adjust Strength:</label>
+                        <input 
+                          type="range" 
+                          min="1" 
+                          max="10" 
+                          value={editedStrength} 
+                          onChange={(e) => setEditedStrength(parseInt(e.target.value))}
+                          className="w-32 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                        />
+                        <span className="text-xs font-bold text-indigo-600">{editedStrength}</span>
+                      </div>
+                    )}
+                  </div>
                 <div className="flex space-x-2">
                   {editingMemoryId === memory.id ? (
                     <>
@@ -83,7 +104,7 @@ const MemoryScreen: React.FC = () => {
                     </>
                   ) : (
                     <button
-                      onClick={() => handleEditClick(memory.id, memory.content)}
+                      onClick={() => handleEditClick(memory.id, memory.content, memory.strength)}
                       className="p-1 rounded-md text-indigo-600 hover:bg-indigo-100 transition-colors"
                       title="Edit Memory"
                     >

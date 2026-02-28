@@ -58,8 +58,10 @@ const generateImageFunction: FunctionDeclaration = {
 const app = express();
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
+
+
 
 const getOAuth2Client = () => {
   const appUrl = (process.env.APP_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -79,7 +81,8 @@ app.get("/api/auth/google/url", (req, res) => {
   const oauth2Client = getOAuth2Client();
   const scopes = [
     'https://www.googleapis.com/auth/drive.readonly',
-    'https://www.googleapis.com/auth/drive.metadata.readonly'
+    'https://www.googleapis.com/auth/drive.metadata.readonly',
+    'https://www.googleapis.com/auth/drive.file'
   ];
 
   const url = oauth2Client.generateAuthUrl({
@@ -238,7 +241,7 @@ app.post("/api/drive/upload", async (req, res) => {
 });
 
 app.post("/api/proactive-message", async (req, res) => {
-  const { chatHistory, aiProfile, userProfile, apiKey: clientApiKey, fcmToken } = req.body;
+  const { chatHistory, aiProfile, userProfile, apiKey: clientApiKey, fcmToken, timeZone } = req.body;
 
   if (!aiProfile || !userProfile) {
     return res.status(400).json({ error: "AI Profile and User Profile are required." });
@@ -265,7 +268,7 @@ app.post("/api/proactive-message", async (req, res) => {
     const ai = new GoogleGenAI({ apiKey });
     const now = new Date();
     const timeContext = aiProfile.timeAwareness 
-      ? `\n[CURRENT TIME: ${now.toLocaleString()}]`
+      ? `\n[CURRENT TIME: ${now.toLocaleString('en-US', { timeZone: timeZone || 'UTC' })}]`
       : '';
     const prompt = `You are ${aiProfile.name}, a helpful, creative, and observant AI companion. Your personality is: ${aiProfile.personality}. Your backstory is: ${aiProfile.backstory}.${timeContext}\n\nUser's name: ${userProfile.name}. User's info: ${userProfile.info}. User's preferences: ${userProfile.preferences}.\n\nBased on the following recent chat history (if any), generate a short, proactive check-in message. The message should be friendly, relevant to the previous conversation, or a general check-in. Keep it concise and natural. If there's no recent context, a general friendly greeting is fine.\n\nRecent Chat History:\n${chatHistory.map((msg: any) => `${msg.role}: ${msg.content}`).join('\n')}\n\nYour proactive message:`;
 
@@ -290,7 +293,7 @@ app.post("/api/proactive-message", async (req, res) => {
           console.log("AI called generateImage with prompt:", call.args?.prompt);
           try {
             const imageResponse = await ai.models.generateContent({
-              model: 'gemini-3.1-flash-image-preview',
+              model: 'gemini-2.5-flash-image',
               contents: {
                 parts: [
                   {
@@ -300,8 +303,7 @@ app.post("/api/proactive-message", async (req, res) => {
               },
               config: {
                 imageConfig: {
-                  aspectRatio: "1:1",
-                  imageSize: "1K"
+                  aspectRatio: "1:1"
                 },
               },
             });
@@ -336,7 +338,7 @@ app.post("/api/proactive-message", async (req, res) => {
           data: {
             type: 'chat',
             aiName: aiProfile.name,
-            ...(generatedImage && { image: generatedImage })
+            hasImage: generatedImage ? 'true' : 'false'
           },
           token: fcmToken,
         });

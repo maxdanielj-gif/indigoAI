@@ -1,6 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink } from 'lucide-react';
+import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink, Plus, MessageSquare, History, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
+
+// Utility function to convert base64 to ArrayBuffer
+const base64ToArrayBuffer = (base64: string) => {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
 import { useApp } from '../context/AppContext';
 import { showNativeNotification } from '../services/firebaseService';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -9,12 +21,21 @@ import * as pdfjsLib from 'pdfjs-dist';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 const ChatScreen: React.FC = () => {
-  const { aiProfile, userProfile, chatHistory, addChatMessage, updateChatMessage, deleteChatMessage, setChatHistory, clearHistory, knowledgeBase, addToKnowledgeBase, addToGallery, apiKey, memories, journal, addJournalEntry, addMemory, showTimestamps } = useApp();
+  const { 
+    aiProfile, userProfile, chatHistory, addChatMessage, updateChatMessage, 
+    deleteChatMessage, setChatHistory, clearHistory, knowledgeBase, 
+    addToKnowledgeBase, addToGallery, apiKey, memories, journal, 
+    addJournalEntry, addMemory, showTimestamps, timeZone,
+    sessions, activeSessionId, createNewSession, switchSession, deleteSession, renameSession
+  } = useApp();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [attachments, setAttachments] = useState<{ type: 'image' | 'text' | 'pdf'; content: string; name: string }[]>([]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [isSessionsSidebarOpen, setIsSessionsSidebarOpen] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [newSessionTitle, setNewSessionTitle] = useState('');
 
   const [readMessages, setReadMessages] = useState<Set<string>>(new Set());
   const [isLiveApiActive, setIsLiveApiActive] = useState(false);
@@ -356,14 +377,46 @@ const ChatScreen: React.FC = () => {
 
             const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
             if (base64Audio) {
-                const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
-                // Apply speed (playbackRate) - Gemini TTS doesn't support pitch directly in the same way as Web Speech API
-                // but we can adjust playback rate on the audio element.
-                audio.playbackRate = aiProfile.voiceSpeed || 1.0;
-                audio.play();
-                audio.onended = () => {
-                    setReadMessages(prev => new Set(prev).add(messageId));
-                };
+                try {
+                    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    const arrayBuffer = base64ToArrayBuffer(base64Audio);
+                    
+                    // Check for "RIFF" header (WAV)
+                    const header = new Uint8Array(arrayBuffer.slice(0, 4));
+                    const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
+
+                    let audioBuffer: AudioBuffer;
+                    if (isWav) {
+                        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    } else {
+                        // Assume raw PCM 16-bit 24kHz mono (standard for Gemini TTS)
+                        const pcmData = new Int16Array(arrayBuffer);
+                        const float32Data = new Float32Array(pcmData.length);
+                        for (let i = 0; i < pcmData.length; i++) {
+                            float32Data[i] = pcmData[i] / 32768.0;
+                        }
+                        audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
+                        audioBuffer.getChannelData(0).set(float32Data);
+                    }
+
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.playbackRate.value = aiProfile.voiceSpeed || 1.0;
+                    source.connect(audioContext.destination);
+                    
+                    // On mobile, we might need to resume the context
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                    
+                    source.start(0);
+                    source.onended = () => {
+                        setReadMessages(prev => new Set(prev).add(messageId));
+                    };
+                } catch (audioError) {
+                    console.error("Audio playback error:", audioError);
+                    speakWithBrowser(text, messageId);
+                }
             }
         } catch (error) {
             console.error("Gemini TTS Error:", error);
@@ -596,19 +649,6 @@ const ChatScreen: React.FC = () => {
           
           // Generate Image
           try {
-             // Use Gemini 2.5 Flash Image for generation (as per instructions to use it by default, though usually it's for input)
-             // Or use a placeholder if that's not supported for generation in this context.
-             // Actually, the user instructions said "General Image Generation...: 'gemini-2.5-flash-image'".
-             // But the SDK method is `generateImages` for Imagen, or `generateContent` for others.
-             // Let's try to use `generateImages` with `imagen-3.0-generate-001` as it's the standard, 
-             // OR use `picsum` as a fallback/demo if the API key doesn't support Imagen.
-             // Given the strict model list, I'll try to use a mock for now to ensure reliability in this demo,
-             // OR use the `generateImages` if I can.
-             // Let's use a reliable placeholder for the demo to ensure "Visual Generation" works immediately without complex API setup errors.
-             // Wait, the user specifically asked for "Visual Generation".
-             
-             // Let's try to fetch a real image if possible, or fallback.
-             // I'll use a placeholder service that supports text-based seeds to simulate generation.
              if (!apiKey || !(await (window as any).aistudio.hasSelectedApiKey())) {
                  alert('Please select an API key for image generation in settings. You may need a paid Google Cloud project. See billing documentation: ai.google.dev/gemini-api/docs/billing');
                  await (window as any).aistudio.openSelectKey();
@@ -618,14 +658,7 @@ const ChatScreen: React.FC = () => {
              const imageAiClient = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY! });
              
              // Construct full prompt with AI appearance (matching ImageGeneratorScreen logic)
-             const fullPrompt = `
-               Generate an image of ${imageDescription}
-               
-               IMPORTANT: The character in the image MUST resemble the following description and reference image (if provided).
-               
-               Character Appearance Description:
-               ${aiProfile.appearance}
-             `;
+             const fullPrompt = `Generate an image of ${imageDescription}. The character in the image MUST resemble this description: ${aiProfile.appearance}`;
 
              const parts: any[] = [{ text: fullPrompt }];
 
@@ -644,13 +677,12 @@ const ChatScreen: React.FC = () => {
              }
 
              const imageGenerationResponse = await imageAiClient.models.generateContent({
-                 model: 'gemini-2.5-flash-image',
+                 model: 'gemini-2.5-flash-image', // Use default image generation model
                  contents: { parts },
                  config: {
-                     // @ts-ignore
                      imageConfig: {
-                         aspectRatio: '1:1',
-                     }
+                         aspectRatio: '1:1'
+                     },
                  },
              });
 
@@ -660,6 +692,8 @@ const ChatScreen: React.FC = () => {
                      if (part.inlineData) {
                          imageUrl = `data:image/png;base64,${part.inlineData.data}`;
                          break;
+                     } else if (part.text) {
+                         console.warn("Image generation model returned text:", part.text);
                      }
                  }
              }
@@ -692,6 +726,12 @@ const ChatScreen: React.FC = () => {
              
           } catch (e) {
               console.error("Image generation failed", e);
+              addChatMessage({
+                  id: (Date.now() + 3).toString(),
+                  role: 'model',
+                  content: `Image generation failed: ${e.message || 'Unknown error'}`,
+                  timestamp: Date.now(),
+              });
           }
       }
 
@@ -915,47 +955,141 @@ const ChatScreen: React.FC = () => {
   };
 
   const handleClear = () => {
-    if (window.confirm("Are you sure you want to clear the chat history?")) {
+    if (window.confirm("Are you sure you want to clear the chat history for this session?")) {
         clearHistory();
     }
   };
 
-  return (
-    <div className="flex flex-col h-full bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-indigo-50">
-        <div className="flex items-center space-x-3">
-            {aiProfile.referenceImage && (
-                <img src={aiProfile.referenceImage} alt="AI" className="w-8 h-8 rounded-full object-cover" />
-            )}
-            <div>
-                <h2 className="font-bold text-indigo-900">{aiProfile.name}</h2>
-                <p className="text-xs text-indigo-500">Online</p>
-            </div>
-            <button
-                onClick={handleCamera}
-                className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
-                title="Take Photo"
-            >
-                <Camera className="w-4 h-4" />
-            </button>
-        </div>
-        <div className="flex space-x-2 items-center">
-            
+  const handleRenameSession = (id: string) => {
+    if (newSessionTitle.trim()) {
+        renameSession(id, newSessionTitle.trim());
+        setEditingSessionId(null);
+        setNewSessionTitle('');
+    }
+  };
 
-            <button
-              onClick={() => setIsLiveApiActive(prev => !prev)}
-              className={`p-2 rounded-full ${isLiveApiActive ? 'bg-red-500 text-white hover:bg-red-600' : 'text-indigo-600 hover:bg-indigo-100'}`}
-              title={isLiveApiActive ? 'Deactivate Live Conversation' : 'Activate Live Conversation'}
-            >
-              <Mic className="w-4 h-4" />
-            </button>
-            <button
-            onClick={handleClear}
-            className="text-xs text-red-500 hover:text-red-700 px-3 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors"
-            >
-            Clear Chat
-            </button>
+  return (
+    <div className="flex h-full bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 relative">
+      {/* Sessions Sidebar */}
+      <div className={`
+        absolute inset-y-0 left-0 z-30 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out
+        ${isSessionsSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:relative lg:translate-x-0 ${isSessionsSidebarOpen ? 'lg:w-64' : 'lg:w-0'}
+      `}>
+        <div className="flex flex-col h-full">
+            <div className="p-4 border-b border-gray-800 flex items-center justify-between">
+                <h3 className="font-bold text-sm uppercase tracking-wider text-gray-400">Chat History</h3>
+                <button 
+                    onClick={() => createNewSession()}
+                    className="p-1.5 bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors"
+                    title="New Chat"
+                >
+                    <Plus className="w-4 h-4" />
+                </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                {sessions.map((session) => (
+                    <div 
+                        key={session.id}
+                        className={`
+                            group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors
+                            ${activeSessionId === session.id ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}
+                        `}
+                        onClick={() => switchSession(session.id)}
+                    >
+                        <div className="flex items-center space-x-3 overflow-hidden flex-1">
+                            <MessageSquare className="w-4 h-4 flex-shrink-0" />
+                            {editingSessionId === session.id ? (
+                                <input 
+                                    autoFocus
+                                    className="bg-transparent border-b border-indigo-500 outline-none w-full text-sm"
+                                    value={newSessionTitle}
+                                    onChange={(e) => setNewSessionTitle(e.target.value)}
+                                    onBlur={() => handleRenameSession(session.id)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleRenameSession(session.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            ) : (
+                                <span className="text-sm truncate">{session.title}</span>
+                            )}
+                        </div>
+                        
+                        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingSessionId(session.id);
+                                    setNewSessionTitle(session.title);
+                                }}
+                                className="p-1 hover:text-indigo-400"
+                            >
+                                <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm("Delete this conversation?")) deleteSession(session.id);
+                                }}
+                                className="p-1 hover:text-red-400"
+                            >
+                                <Trash2 className="w-3 h-3" />
+                            </button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+            
+            <div className="p-4 border-t border-gray-800 text-xs text-gray-500 flex items-center justify-center">
+                <History className="w-3 h-3 mr-2" />
+                {sessions.length} Conversations
+            </div>
+        </div>
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Header */}
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-indigo-50">
+            <div className="flex items-center space-x-3">
+                <button 
+                    onClick={() => setIsSessionsSidebarOpen(!isSessionsSidebarOpen)}
+                    className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors lg:block"
+                    title="Toggle History"
+                >
+                    {isSessionsSidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+                </button>
+                {aiProfile.referenceImage && (
+                    <img src={aiProfile.referenceImage} alt="AI" className="w-8 h-8 rounded-full object-cover" />
+                )}
+                <div>
+                    <h2 className="font-bold text-indigo-900">{aiProfile.name}</h2>
+                    <p className="text-[10px] text-indigo-500 uppercase tracking-tighter">
+                        {sessions.find(s => s.id === activeSessionId)?.title || 'Chat'}
+                    </p>
+                </div>
+                <button
+                    onClick={handleCamera}
+                    className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
+                    title="Take Photo"
+                >
+                    <Camera className="w-4 h-4" />
+                </button>
+            </div>
+            <div className="flex space-x-2 items-center">
+                <button
+                  onClick={() => setIsLiveApiActive(prev => !prev)}
+                  className={`p-2 rounded-full ${isLiveApiActive ? 'bg-red-500 text-white hover:bg-red-600' : 'text-indigo-600 hover:bg-indigo-100'}`}
+                  title={isLiveApiActive ? 'Deactivate Live Conversation' : 'Activate Live Conversation'}
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
+                <button
+                onClick={handleClear}
+                className="text-xs text-red-500 hover:text-red-700 px-3 py-1 rounded border border-red-200 hover:bg-red-50 transition-colors"
+                >
+                Clear
+                </button>
             </div>
         </div>
         
@@ -1076,7 +1210,9 @@ const ChatScreen: React.FC = () => {
                 </div>
                 {showTimestamps && (
                     <span className="text-xs text-gray-400 mt-1 px-1 flex items-center space-x-1">
-                        <span>{new Date(msg.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span>
+                            {new Date(msg.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone })} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone })}
+                        </span>
                         {msg.role === 'model' && readMessages.has(msg.id) && <span title="Read"><CheckCheck className="w-3 h-3 text-indigo-500" /></span>}
                     </span>
                 )}
@@ -1233,6 +1369,7 @@ const ChatScreen: React.FC = () => {
         </p>
       </div>
     </div>
+  </div>
   );
 };
 

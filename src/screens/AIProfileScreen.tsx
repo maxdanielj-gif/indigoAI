@@ -1,11 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useApp, AIProfile } from '../context/AppContext';
+import { useApp } from '../context/AppContext';
+import { AIProfile } from '../types';
 import { Upload, Plus, Save, Trash2, Users, Play, Download } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
+// Utility function to convert base64 to ArrayBuffer
+const base64ToArrayBuffer = (base64: string) => {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+};
+
 const AIProfileScreen: React.FC = () => {
-  const { aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, apiKey, setAmbientMode, setAmbientFrequency } = useApp();
-  console.log('AIProfileScreen rendering, aiProfile:', aiProfile);
+  const { aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, apiKey, setAmbientMode, setAmbientFrequency, addToast } = useApp();
   const [name, setName] = useState(aiProfile.name);
   const [personality, setPersonality] = useState(aiProfile.personality);
   const [backstory, setBackstory] = useState(aiProfile.backstory);
@@ -15,12 +26,11 @@ const AIProfileScreen: React.FC = () => {
   const [voiceSpeed, setVoiceSpeed] = useState(aiProfile.voiceSpeed || 1.0);
   const [autoReadMessages, setAutoReadMessages] = useState(aiProfile.autoReadMessages || false);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female' | 'none'>(aiProfile.voiceGender || 'none');
-  const [responseLength, setResponseLength] = useState<number>(aiProfile.responseLength || 2); // Paragraphs
-  const [responseDetail, setResponseDetail] = useState<AIProfile['responseDetail']>(aiProfile.responseDetail || 'Standard');
-  const [responseTone, setResponseTone] = useState<AIProfile['responseTone']>(aiProfile.responseTone || 'Neutral');
+  const [responseLength, setResponseLength] = useState<AIProfile['responseLength']>(aiProfile.responseLength || 'medium');
+  const [responseDetail, setResponseDetail] = useState<AIProfile['responseDetail']>(aiProfile.responseDetail || 'standard');
+  const [responseTone, setResponseTone] = useState<AIProfile['responseTone']>(aiProfile.responseTone || 'friendly');
   const [customParagraphCount, setCustomParagraphCount] = useState<number | null>(aiProfile.customParagraphCount || null);
   const [customWordCount, setCustomWordCount] = useState<number | null>(aiProfile.customWordCount || null);
-  const [customStyle, setCustomStyle] = useState('');
   const [proactiveMessageFrequency, setProactiveMessageFrequency] = useState<AIProfile['proactiveMessageFrequency']>(aiProfile.proactiveMessageFrequency || 'off');
   const [model, setModel] = useState(aiProfile.model || 'gemini-3.1-pro-preview');
   const [temperature, setTemperature] = useState(aiProfile.temperature || 0.7);
@@ -50,10 +60,16 @@ const AIProfileScreen: React.FC = () => {
     const text = `Hello! I am ${name}. This is an example of how I sound.`;
 
     const isGeminiVoice = voiceURI && geminiVoices.includes(voiceURI);
+    const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
 
-    if (isGeminiVoice && apiKey) {
+    if (isGeminiVoice) {
+        if (!effectiveApiKey) {
+            alert("Gemini API Key is not configured. Please set it in Settings or ensure the default key is available.");
+            setIsTestingVoice(false);
+            return;
+        }
         try {
-            const aiClient = new GoogleGenAI({ apiKey });
+            const aiClient = new GoogleGenAI({ apiKey: effectiveApiKey });
             const response = await aiClient.models.generateContent({
                 model: "gemini-2.5-flash-preview-tts",
                 contents: [{ parts: [{ text }] }],
@@ -71,12 +87,48 @@ const AIProfileScreen: React.FC = () => {
 
             const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
             if (base64Audio) {
-                const audio = new Audio(`data:audio/mpeg;base64,${base64Audio}`);
-                audio.playbackRate = voiceSpeed;
-                audio.play();
-                audio.onended = () => setIsTestingVoice(false);
+                try {
+                    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    const arrayBuffer = base64ToArrayBuffer(base64Audio);
+                    
+                    // Check for "RIFF" header (WAV)
+                    const header = new Uint8Array(arrayBuffer.slice(0, 4));
+                    const isWav = header[0] === 0x52 && header[1] === 0x49 && header[2] === 0x46 && header[3] === 0x46;
+
+                    let audioBuffer: AudioBuffer;
+                    if (isWav) {
+                        audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    } else {
+                        // Assume raw PCM 16-bit 24kHz mono (standard for Gemini TTS)
+                        const pcmData = new Int16Array(arrayBuffer);
+                        const float32Data = new Float32Array(pcmData.length);
+                        for (let i = 0; i < pcmData.length; i++) {
+                            float32Data[i] = pcmData[i] / 32768.0;
+                        }
+                        audioBuffer = audioContext.createBuffer(1, float32Data.length, 24000);
+                        audioBuffer.getChannelData(0).set(float32Data);
+                    }
+
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.playbackRate.value = voiceSpeed;
+                    source.connect(audioContext.destination);
+                    
+                    // On mobile, we might need to resume the context
+                    if (audioContext.state === 'suspended') {
+                        await audioContext.resume();
+                    }
+                    
+                    source.start(0);
+                    source.onended = () => setIsTestingVoice(false);
+                } catch (audioError) {
+                    console.error("Audio playback error:", audioError);
+                    alert("Failed to play audio. The audio data format might be unsupported by this browser.");
+                    setIsTestingVoice(false);
+                }
             } else {
                 setIsTestingVoice(false);
+                alert("Voice generation failed: No audio data received.");
             }
         } catch (error) {
             console.error("Gemini TTS Error:", error);
@@ -93,11 +145,19 @@ const AIProfileScreen: React.FC = () => {
     const utterance = new SpeechSynthesisUtterance(text);
     const availableVoices = window.speechSynthesis.getVoices();
     
+    let selectedVoice: SpeechSynthesisVoice | undefined;
     if (voiceURI) {
-        const selectedVoice = availableVoices.find(v => v.voiceURI === voiceURI);
-        if (selectedVoice) {
-            utterance.voice = selectedVoice;
-        }
+        selectedVoice = availableVoices.find(v => v.voiceURI === voiceURI);
+    }
+
+    // If no specific voiceURI is selected or found, try to match by gender
+    if (!selectedVoice && voiceGender !== 'none') {
+        const genderFilter = voiceGender === 'male' ? 'male' : 'female';
+        selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(genderFilter));
+    }
+
+    if (selectedVoice) {
+        utterance.voice = selectedVoice;
     }
     
     utterance.pitch = voicePitch;
@@ -119,12 +179,7 @@ const AIProfileScreen: React.FC = () => {
     setVoiceSpeed(aiProfile.voiceSpeed || 1.0);
     setAutoReadMessages(aiProfile.autoReadMessages || false);
     setVoiceGender(aiProfile.voiceGender || 'none');
-    setResponseLength(aiProfile.responseLength || 2); // Load response length
-    if (aiProfile.responseStyle && !['Concise', 'Detailed', 'Humorous', 'Formal'].includes(aiProfile.responseStyle)) {
-        setCustomStyle(aiProfile.responseStyle);
-    } else {
-        setCustomStyle('');
-    }
+    setResponseLength(aiProfile.responseLength || 'medium'); // Load response length
     setProactiveMessageFrequency(aiProfile.proactiveMessageFrequency || 'off');
     setReferenceImage(aiProfile.referenceImage);
     setModel(aiProfile.model || 'gemini-3.1-pro-preview');
@@ -160,8 +215,11 @@ const AIProfileScreen: React.FC = () => {
       voiceSpeed,
       autoReadMessages,
       voiceGender,
-      responseStyle: aiProfile.responseStyle,
       responseLength,
+      responseDetail,
+      responseTone,
+      customParagraphCount,
+      customWordCount,
       proactiveMessageFrequency,
       model,
       temperature,
@@ -171,9 +229,15 @@ const AIProfileScreen: React.FC = () => {
       ambientMode: ambientModeState,
       ambientFrequency: ambientFrequencyState,
       aiCanGenerateImages: aiCanGenerateImagesState,
+      aiCanGenerateSpeech: aiProfile.aiCanGenerateSpeech,
+      aiCanUseTools: aiProfile.aiCanUseTools,
+      aiCanBrowse: aiProfile.aiCanBrowse,
+      chatHistory: aiProfile.chatHistory,
+      memories: aiProfile.memories,
+      journal: aiProfile.journal,
     };
     savePersona(updatedProfile);
-    alert('AI Persona saved!');
+    addToast({ title: "Persona Saved", message: "AI Persona settings saved successfully!", type: "success" });
   };
 
   const handleSaveAsNew = () => {
@@ -190,9 +254,12 @@ const AIProfileScreen: React.FC = () => {
       voiceSpeed,
       autoReadMessages,
       voiceGender,
-      responseStyle: aiProfile.responseStyle,
       responseLength,
-      proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
+      responseDetail,
+      responseTone,
+      customParagraphCount,
+      customWordCount,
+      proactiveMessageFrequency: proactiveMessageFrequency,
       model: aiProfile.model,
       temperature: aiProfile.temperature,
       topK: aiProfile.topK,
@@ -201,6 +268,12 @@ const AIProfileScreen: React.FC = () => {
       ambientMode: aiProfile.ambientMode,
       ambientFrequency: aiProfile.ambientFrequency,
       aiCanGenerateImages: aiProfile.aiCanGenerateImages,
+      aiCanGenerateSpeech: aiProfile.aiCanGenerateSpeech,
+      aiCanUseTools: aiProfile.aiCanUseTools,
+      aiCanBrowse: aiProfile.aiCanBrowse,
+      chatHistory: [], // New persona starts with fresh history
+      memories: [],
+      journal: [],
     };
     savePersona(newProfile);
     loadPersona(newId); // Switch to new persona
@@ -231,13 +304,26 @@ const AIProfileScreen: React.FC = () => {
         voiceSpeed: 1.0,
         autoReadMessages: false,
         voiceGender: 'none',
-        responseStyle: 'Detailed',
-        responseLength: 2,
+        responseLength: 'medium',
+        responseDetail: 'medium',
+        responseTone: 'friendly',
+        customParagraphCount: null,
+        customWordCount: null,
         proactiveMessageFrequency: 'off',
+        model: 'gemini-3.1-pro-preview',
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
         timeAwareness: true,
         ambientMode: false,
         ambientFrequency: 'off',
         aiCanGenerateImages: false,
+        aiCanGenerateSpeech: false,
+        aiCanUseTools: false,
+        aiCanBrowse: false,
+        chatHistory: [],
+        memories: [],
+        journal: [],
     };
     savePersona(newProfile);
     loadPersona(newId);
@@ -259,7 +345,7 @@ const AIProfileScreen: React.FC = () => {
             Personality: ${personality}
             Backstory: ${backstory}
             Appearance: ${appearance}
-            Response Length: ${responseLength} paragraphs
+            Response Length: ${responseLength === 'custom' ? `${customParagraphCount} paragraphs` : responseLength}
             
             Instructions:
             1. Stay in character at all times.
@@ -525,7 +611,7 @@ const AIProfileScreen: React.FC = () => {
                             className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         >
                             <option value="Concise">Concise</option>
-                            <option value="Standard">Standard</option>
+                            <option value="standard">Standard</option>
                             <option value="Detailed">Detailed</option>
                             <option value="Verbose">Verbose</option>
                         </select>
@@ -537,7 +623,7 @@ const AIProfileScreen: React.FC = () => {
                             onChange={(e) => setResponseTone(e.target.value as AIProfile['responseTone'])}
                             className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                         >
-                            <option value="Neutral">Neutral</option>
+                            <option value="friendly">Friendly</option>
                             <option value="Serious">Serious</option>
                             <option value="Humorous">Humorous</option>
                             <option value="Professional">Professional</option>
@@ -577,15 +663,17 @@ const AIProfileScreen: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Response Length (Paragraphs)</label>
-                        <input
-                            type="number"
-                            min="1"
-                            max="20"
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Response Length</label>
+                        <select
                             value={responseLength}
-                            onChange={(e) => setResponseLength(parseInt(e.target.value) || 1)}
+                            onChange={(e) => setResponseLength(e.target.value as AIProfile['responseLength'])}
                             className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                        />
+                        >
+                            <option value="short">Short</option>
+                            <option value="medium">Medium</option>
+                            <option value="long">Long</option>
+                            <option value="custom">Custom</option>
+                        </select>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Proactive Messages</label>

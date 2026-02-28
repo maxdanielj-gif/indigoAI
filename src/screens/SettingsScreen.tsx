@@ -5,15 +5,15 @@ import { Download, Upload, Trash2, Bell, FileText, File, Key, HelpCircle, Save, 
 
 const SettingsScreen: React.FC = () => {
   const { 
-    exportData, importData, knowledgeBase, addToKnowledgeBase, apiKey, setApiKey, 
+    importData, knowledgeBase, addToKnowledgeBase, apiKey, setApiKey, 
     setShowTutorial, autoSaveChat, setAutoSaveChat, autoSaveChatInterval, 
     setAutoSaveChatInterval, autoJsonBackup, setAutoJsonBackup, 
     autoJsonBackupInterval, setAutoJsonBackupInterval, resetApp, chatHistory, 
     isGoogleDriveConnected, setIsGoogleDriveConnected, autoDriveBackup, 
     setAutoDriveBackup, proactiveMessageFrequency, setProactiveMessageFrequency,
     aiProfile, userProfile, notificationsEnabled, setNotificationsEnabled,
-    addChatMessage, addToast, fcmToken, setFcmToken,
-    showTimestamps, setShowTimestamps
+    addChatMessage, fcmToken, setFcmToken, exportData, addToast,
+    showTimestamps, setShowTimestamps, timeZone, setTimeZone
   } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const kbInputRef = useRef<HTMLInputElement>(null);
@@ -356,6 +356,29 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
+  const handleManualDriveBackup = async () => {
+    addToast({ title: "Google Drive Backup", message: "Initiating manual backup to Google Drive...", type: "info" });
+    try {
+      const data = await exportData();
+      const filename = `indigo-ai-backup-${new Date().toISOString().split('T')[0]}-${Date.now()}.json`;
+      const res = await fetch('/api/drive/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename, content: data }),
+      });
+
+      if (res.ok) {
+        addToast({ title: "Backup Successful", message: "App data successfully backed up to Google Drive!", type: "success" });
+      } else {
+        const error = await res.json();
+        addToast({ title: "Backup Failed", message: `Failed to backup to Google Drive: ${error.error || 'Unknown error'}`, type: "error" });
+      }
+    } catch (e: any) {
+      console.error("Manual Google Drive backup failed:", e);
+      addToast({ title: "Backup Failed", message: `Failed to backup to Google Drive: ${e.message || 'Unknown error'}`, type: "error" });
+    }
+  };
+
   return (
     <div className="p-6 bg-white rounded-lg shadow-md max-w-2xl mx-auto">
       <h2 className="text-2xl font-bold mb-6 text-indigo-600">Settings</h2>
@@ -483,6 +506,13 @@ const SettingsScreen: React.FC = () => {
                                 title="Refresh Files"
                             >
                                 <RefreshCw className={`w-4 h-4 ${isFetchingDrive ? 'animate-spin' : ''}`} />
+                            </button>
+                            <button 
+                                onClick={handleManualDriveBackup}
+                                className="p-2 text-blue-600 hover:bg-blue-100 rounded-full transition-colors"
+                                title="Backup Now"
+                            >
+                                <Cloud className="w-4 h-4" />
                             </button>
                             <button 
                                 onClick={handleGoogleDriveDisconnect}
@@ -675,6 +705,27 @@ const SettingsScreen: React.FC = () => {
                     >
                         <span className={`${showTimestamps ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}></span>
                     </button>
+                </div>
+
+                <div className="flex flex-col space-y-2">
+                    <div className="flex items-center">
+                        <Clock className="w-5 h-5 text-gray-500 mr-3" />
+                        <div>
+                            <span className="text-gray-700 block">Time Zone</span>
+                            <span className="text-xs text-gray-500">Set your local time zone for all timestamps.</span>
+                        </div>
+                    </div>
+                    <select
+                        value={timeZone}
+                        onChange={(e) => setTimeZone(e.target.value)}
+                        className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    >
+                        {Intl.supportedValuesOf('timeZone').map((tz) => (
+                            <option key={tz} value={tz}>
+                                {tz}
+                            </option>
+                        ))}
+                    </select>
                 </div>
             </div>
         </section>
