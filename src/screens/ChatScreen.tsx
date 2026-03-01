@@ -15,6 +15,7 @@ const base64ToArrayBuffer = (base64: string) => {
 
 import { useApp } from '../context/AppContext';
 import { showNativeNotification } from '../services/firebaseService';
+import { cloneVoice } from '../services/huggingface';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
@@ -352,6 +353,28 @@ const ChatScreen: React.FC = () => {
 
   // Text to Speech
   const speakMessage = async (text: string, messageId: string) => {
+    // Use Hugging Face F5-TTS if configured
+    if (aiProfile.hfApiKey && aiProfile.hfReferenceAudioUrl) {
+        try {
+            const audioBlob = await cloneVoice({
+                text: text.replace(/\*.*?\*/g, ''), // Remove asterisks for speech
+                referenceAudioUrl: aiProfile.hfReferenceAudioUrl,
+                token: aiProfile.hfApiKey
+            });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.playbackRate = aiProfile.voiceSpeed;
+            audio.onended = () => {
+                setReadMessages(prev => new Set(prev).add(messageId));
+                URL.revokeObjectURL(audioUrl);
+            };
+            audio.play();
+            return;
+        } catch (err) {
+            console.error("HF TTS Error, falling back to other methods:", err);
+        }
+    }
+
     // Check if selected voice is a Gemini voice
     const geminiVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
     const isGeminiVoice = aiProfile.voiceURI && geminiVoices.includes(aiProfile.voiceURI);

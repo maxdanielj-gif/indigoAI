@@ -18,6 +18,8 @@ const SettingsScreen: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const kbInputRef = useRef<HTMLInputElement>(null);
   const [localApiKey, setLocalApiKey] = useState(apiKey || '');
+  const [localHfApiKey, setLocalHfApiKey] = useState(aiProfile.hfApiKey || '');
+  const [localHfReferenceAudioUrl, setLocalHfReferenceAudioUrl] = useState(aiProfile.hfReferenceAudioUrl || 'https://raw.githubusercontent.com/maxdanielj-gif/voice-clone/main/Kelly_2.wav');
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isFetchingDrive, setIsFetchingDrive] = useState(false);
 
@@ -146,7 +148,18 @@ const SettingsScreen: React.FC = () => {
 
   const handleSaveApiKey = () => {
       setApiKey(localApiKey.trim() || null);
-      addToast({ title: "Saved", message: "API Key saved successfully!", type: "success" });
+      addToast({ title: "Saved", message: "Gemini API Key saved successfully!", type: "success" });
+  };
+
+  const handleSaveHfSettings = () => {
+      const updatedProfile = { 
+        ...aiProfile, 
+        hfApiKey: localHfApiKey.trim() || null,
+        hfReferenceAudioUrl: localHfReferenceAudioUrl.trim() || null
+      };
+      // Assuming setAIProfile is available in useApp
+      (useApp() as any).setAIProfile(updatedProfile);
+      addToast({ title: "Saved", message: "Hugging Face settings saved successfully!", type: "success" });
   };
 
   const handleEnablePushNotifications = async () => {
@@ -413,6 +426,36 @@ const SettingsScreen: React.FC = () => {
                     <p className="text-xs text-gray-500 mt-2">
                         Leave empty to use the default system key. Providing your own key allows for higher rate limits and custom usage.
                     </p>
+                </div>
+
+                <div className="pt-4 border-t border-gray-100">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Hugging Face API Token (for Voice/Image/Video)</label>
+                    <div className="flex space-x-2 mb-4">
+                        <input
+                            type="password"
+                            value={localHfApiKey}
+                            onChange={(e) => setLocalHfApiKey(e.target.value)}
+                            className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            placeholder="Enter your HF Token (hf_...)"
+                        />
+                    </div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Voice Clone Reference Audio URL</label>
+                    <div className="flex space-x-2">
+                        <input
+                            type="text"
+                            value={localHfReferenceAudioUrl}
+                            onChange={(e) => setLocalHfReferenceAudioUrl(e.target.value)}
+                            className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                            placeholder="https://.../voice.wav"
+                        />
+                        <button
+                            onClick={handleSaveHfSettings}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
+                        >
+                            Save HF
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">Used for F5-TTS voice cloning.</p>
                 </div>
             </div>
         </section>

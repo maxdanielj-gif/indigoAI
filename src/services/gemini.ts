@@ -10,7 +10,7 @@ export interface Message {
 export const sendMessage = async (history: Message[], message: string, systemInstruction?: string) => {
   try {
     const chat = ai.chats.create({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       config: {
         systemInstruction: systemInstruction || "You are a helpful AI companion.",
       },
@@ -31,7 +31,7 @@ export const sendMessage = async (history: Message[], message: string, systemIns
 export const generateImageDescription = async (prompt: string) => {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: `Generate a detailed description for an image based on this prompt: ${prompt}`,
     });
     return response.text;

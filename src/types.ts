@@ -35,6 +35,8 @@ export interface AIProfile {
   aiCanGenerateSpeech: boolean;
   aiCanUseTools: boolean;
   aiCanBrowse: boolean;
+  hfApiKey?: string | null;
+  hfReferenceAudioUrl?: string | null;
   chatHistory?: ChatMessage[]; // Legacy support
   sessions?: ChatSession[];
   activeSessionId?: string;

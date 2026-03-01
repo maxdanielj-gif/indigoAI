@@ -1,13 +1,16 @@
 import React, { useState, useRef } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { useApp } from '../context/AppContext';
-import { Upload, X } from 'lucide-react';
+import { Upload, X, Image as ImageIcon, Video as VideoIcon, Download } from 'lucide-react';
+import { generateImage, generateVideo } from '../services/huggingface';
 
 const ImageGeneratorScreen: React.FC = () => {
   const { aiProfile, addToGallery, apiKey } = useApp();
   const [prompt, setPrompt] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1');
+  const [genType, setGenType] = useState<'image' | 'video'>('image');
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedVideo, setGeneratedVideo] = useState<string | null>(null);
   const [poseReferenceImage, setPoseReferenceImage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,109 +39,84 @@ const ImageGeneratorScreen: React.FC = () => {
 
     setIsLoading(true);
     try {
-      const aiClient = getAiClient();
-      // Construct full prompt with AI appearance
-      const fullPrompt = `
-        Generate an image of ${prompt}
-        
-        IMPORTANT: The character in the image MUST resemble the following description and reference image (if provided).
-        
-        Character Appearance Description:
-        ${aiProfile.appearance}
-      `;
+      const fullPrompt = `A high quality ${genType} of ${prompt}. Appearance: ${aiProfile.appearance}. Style: Photorealistic, cinematic lighting.`;
 
-      const parts: any[] = [{ text: fullPrompt }];
-
-      // Add reference image if available
-      if (aiProfile.referenceImage) {
-        try {
-            // Extract mimeType from data URL (e.g., "data:image/png;base64,...")
+      if (genType === 'image') {
+        if (aiProfile.hfApiKey) {
+          // Use Hugging Face FLUX
+          const blob = await generateImage({
+            prompt: fullPrompt,
+            token: aiProfile.hfApiKey
+          });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const imageUrl = reader.result as string;
+            setGeneratedImage(imageUrl);
+            setGeneratedVideo(null);
+            addToGallery({
+              id: Date.now().toString(),
+              type: 'generated',
+              url: imageUrl,
+              prompt: prompt,
+              timestamp: Date.now()
+            });
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          // Fallback to Gemini
+          const aiClient = getAiClient();
+          const parts: any[] = [{ text: fullPrompt }];
+          if (aiProfile.referenceImage) {
             const matches = aiProfile.referenceImage.match(/^data:(.+);base64,(.+)$/);
             if (matches && matches.length === 3) {
-                const mimeType = matches[1];
-                const base64Data = matches[2];
-                
-                parts.push({
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Data
-                    }
-                });
-            } else {
-                 console.warn("Invalid reference image format");
+              parts.push({ inlineData: { mimeType: matches[1], data: matches[2] } });
             }
-        } catch (e) {
-            console.error("Error parsing reference image", e);
-        }
-      }
-
-      // Add pose reference image if available
-      if (poseReferenceImage) {
-        try {
-            const matches = poseReferenceImage.match(/^data:(.+);base64,(.+)$/);
-            if (matches && matches.length === 3) {
-                const mimeType = matches[1];
-                const base64Data = matches[2];
-                
-                parts.push({
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Data
-                    }
-                });
-                
-                // Add instruction about pose
-                parts[0].text += `\n\nIMPORTANT: Use the provided image as a pose reference.`;
-            }
-        } catch (e) {
-            console.error("Error parsing pose reference image", e);
-        }
-      }
-
-      // Use gemini-2.5-flash-image for image generation
-      // Note: For image editing/variation based on reference, we pass the image in contents.
-      const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts,
-        },
-        config: {
-          // No system instruction for image model
-          // Add imageConfig for aspect ratio
-          // @ts-ignore - The types might not be fully updated for this specific field yet in all environments
-          imageConfig: {
-            aspectRatio: aspectRatio,
           }
-        },
-      });
-
-      let imageUrl = null;
-      if (response.candidates?.[0]?.content?.parts) {
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData) {
-            const base64EncodeString = part.inlineData.data;
-            imageUrl = `data:image/png;base64,${base64EncodeString}`;
-            break;
+          const response = await aiClient.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: { parts },
+            config: { imageConfig: { aspectRatio } } as any,
+          });
+          let imageUrl = null;
+          if (response.candidates?.[0]?.content?.parts) {
+            for (const part of response.candidates[0].content.parts) {
+              if (part.inlineData) {
+                imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                break;
+              }
+            }
+          }
+          if (imageUrl) {
+            setGeneratedImage(imageUrl);
+            setGeneratedVideo(null);
+            addToGallery({
+              id: Date.now().toString(),
+              type: 'generated',
+              url: imageUrl,
+              prompt: prompt,
+              timestamp: Date.now()
+            });
           }
         }
-      }
-
-      if (imageUrl) {
-        setGeneratedImage(imageUrl);
-        addToGallery({
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-            type: 'generated',
-            url: imageUrl,
-            prompt: prompt,
-            timestamp: Date.now()
-        });
       } else {
-        console.warn('No image generated');
-        alert("Failed to generate image. The model might have refused the request.");
+        // Video Generation
+        if (!aiProfile.hfApiKey) {
+          alert("Hugging Face API Token is required for video generation.");
+          setIsLoading(false);
+          return;
+        }
+        const blob = await generateVideo({
+          prompt: fullPrompt,
+          token: aiProfile.hfApiKey
+        });
+        const videoUrl = URL.createObjectURL(blob);
+        setGeneratedVideo(videoUrl);
+        setGeneratedImage(null);
+        // Note: Gallery currently only supports images, so we don't add video to gallery yet
       }
-    } catch (error) {
-      console.error('Error generating image:', error);
-      alert("Error generating image. Please try again.");
+    } catch (error: any) {
+      console.error(`Error generating ${genType}:`, error);
+      alert(`Error generating ${genType}: ${error.message || "Please try again."}`);
     } finally {
       setIsLoading(false);
     }
@@ -148,6 +126,23 @@ const ImageGeneratorScreen: React.FC = () => {
     <div className="p-6 bg-white rounded-lg shadow-md max-w-3xl mx-auto">
       <h2 className="text-2xl font-bold mb-6 text-indigo-600">Image Generator</h2>
       
+      <div className="flex gap-4 mb-6">
+        <button 
+          onClick={() => setGenType('image')}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 transition-all ${genType === 'image' ? 'bg-indigo-50 border-indigo-600 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+        >
+          <ImageIcon className="w-5 h-5" />
+          Image
+        </button>
+        <button 
+          onClick={() => setGenType('video')}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg border-2 transition-all ${genType === 'video' ? 'bg-indigo-50 border-indigo-600 text-indigo-600' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}
+        >
+          <VideoIcon className="w-5 h-5" />
+          Video
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-4">
             <div>
@@ -241,12 +236,23 @@ const ImageGeneratorScreen: React.FC = () => {
                         download={`generated-${Date.now()}.png`}
                         className="absolute bottom-4 right-4 bg-white text-gray-800 px-3 py-1 rounded shadow-md text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                        Download
+                        <Download className="w-4 h-4" />
+                    </a>
+                </div>
+            ) : generatedVideo ? (
+                <div className="relative w-full h-full group">
+                    <video src={generatedVideo} controls className="w-full h-full rounded-lg" />
+                    <a 
+                        href={generatedVideo} 
+                        download={`generated-${Date.now()}.mp4`}
+                        className="absolute bottom-4 right-4 bg-white text-gray-800 p-2 rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                        <Download className="w-4 h-4" />
                     </a>
                 </div>
             ) : (
                 <div className="text-center text-gray-400 p-4">
-                    <p>Generated image will appear here</p>
+                    <p>Generated {genType} will appear here</p>
                 </div>
             )}
         </div>
