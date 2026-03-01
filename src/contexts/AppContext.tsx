@@ -5,7 +5,7 @@ import {
   ViewType, DEFAULT_AI_PROFILE, DEFAULT_USER_PROFILE, DEFAULT_SETTINGS
 } from '@/lib/types';
 import * as db from '@/lib/db';
-import { sendChatMessage, buildSystemPrompt, generateImage, generateJournalEntry, generateSelfReflection } from '@/lib/ai';
+import { sendChatMessage, buildSystemPrompt, generateImage, generateImageHuggingFace, generateVideoHuggingFace, generateJournalEntry, generateSelfReflection } from '@/lib/ai';
 import { speak } from '@/lib/tts';
 import { supabase } from '@/lib/supabase';
 import {
@@ -60,7 +60,10 @@ interface AppContextType {
   resetAllData: () => Promise<void>;
 
   generateCompanionImage: (prompt: string) => Promise<string | null>;
+  generateHfImage: (prompt: string) => Promise<string | null>;
+  generateHfVideo: (prompt: string) => Promise<string | null>;
   isGeneratingImage: boolean;
+  isGeneratingVideo: boolean;
   userLocation: { lat: number; lng: number } | null;
 
   // Auth & Sync
@@ -98,6 +101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   // Auth & Sync state
@@ -262,7 +266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         timestamp: Date.now(), imageUrl: generatedImageUrl, imagePrompt: imageMatch?.[1],
       };
       setMessages(prev => [...prev, assistantMsg]);
-      if (settings.tts.enabled) speak(assistantMsg.content, settings.tts);
+      if (settings.tts.enabled) speak(assistantMsg.content, settings.tts, settings);
       if (imageUrl) await addImage(imageUrl, 'uploaded', undefined, [], content);
     } catch {
       setMessages(prev => [...prev, { id: uuidv4(), role: 'assistant', content: '*looks concerned* Something went wrong. Please check your settings.', timestamp: Date.now() }]);
@@ -286,7 +290,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const sp = buildSystemPrompt(aiProfile, userProfile, memories, settings, userLocation);
       const r = await sendChatMessage(ctx, sp, settings);
       setMessages(prev => [...prev, { id: uuidv4(), role: 'assistant', content: r, timestamp: Date.now() }]);
-      if (settings.tts.enabled) speak(r, settings.tts);
+      if (settings.tts.enabled) speak(r, settings.tts, settings);
     } catch {
       setMessages(prev => [...prev, { id: uuidv4(), role: 'assistant', content: 'Failed to regenerate.', timestamp: Date.now() }]);
     } finally { setIsLoading(false); }
@@ -387,6 +391,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally { setIsGeneratingImage(false); }
   };
 
+  const generateHfImage = async (prompt: string): Promise<string | null> => {
+    setIsGeneratingImage(true);
+    try {
+      const url = await generateImageHuggingFace(prompt, aiProfile, settings);
+      if (url) await addImage(url, 'generated', prompt, [], 'HF FLUX generation');
+      return url;
+    } finally { setIsGeneratingImage(false); }
+  };
+
+  const generateHfVideo = async (prompt: string): Promise<string | null> => {
+    setIsGeneratingVideo(true);
+    try {
+      const url = await generateVideoHuggingFace(prompt, settings);
+      return url;
+    } finally { setIsGeneratingVideo(false); }
+  };
+
   // ── Auth ──────────────────────────────────────────────────────────
 
   const signOut = async () => {
@@ -482,7 +503,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       aiProfile, updateAIProfile, userProfile, updateUserProfile,
       settings, updateSettings,
       exportData, importData, resetAllData: resetAllDataFn,
-      generateCompanionImage, isGeneratingImage, userLocation,
+      generateCompanionImage, generateHfImage, generateHfVideo, isGeneratingImage, isGeneratingVideo, userLocation,
       authUser, isAuthenticated, signOut,
       syncState, updateSyncState, syncStatus, syncProgress,
       triggerSync, triggerForcePush, triggerForcePull, deleteAllCloudData,

@@ -22,6 +22,7 @@ const SettingsView: React.FC = () => {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showImageKey, setShowImageKey] = useState(false);
+  const [showHfKey, setShowHfKey] = useState(false);
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmCloudDelete, setConfirmCloudDelete] = useState(false);
@@ -299,6 +300,32 @@ const SettingsView: React.FC = () => {
           </div>
         </Section>
 
+        {/* ── Hugging Face API ─────────────────────────────────────── */}
+        <Section id="huggingface" title="Hugging Face API" icon={<Volume2 size={18} />}>
+          <div className="p-3 bg-indigo-950/40 rounded-lg border border-indigo-800/30">
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Add your Hugging Face API token to enable voice cloning (F5-TTS), image generation (FLUX), and video generation (CogVideo).
+            </p>
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Hugging Face API Token</label>
+            <div className="relative">
+              <input type={showHfKey ? 'text' : 'password'} value={settings.hfApiKey} onChange={(e) => updateSettings({ hfApiKey: e.target.value })}
+                className="w-full bg-slate-700/50 text-white text-xs rounded-lg px-3 py-2.5 pr-10 border border-slate-600 focus:border-indigo-500 focus:outline-none font-mono" placeholder="hf_..." />
+              <button onClick={() => setShowHfKey(!showHfKey)} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                {showHfKey ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-1 block">Voice Clone Reference Audio URL</label>
+            <input value={settings.tts.hfReferenceAudioUrl} onChange={(e) => updateSettings({ tts: { ...settings.tts, hfReferenceAudioUrl: e.target.value } })}
+              className="w-full bg-slate-700/50 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-600 focus:border-indigo-500 focus:outline-none"
+              placeholder="https://raw.githubusercontent.com/..." />
+            <p className="text-[10px] text-slate-500 mt-1">URL to a .wav file used as the reference voice for F5-TTS cloning.</p>
+          </div>
+        </Section>
+
         {/* ── Response Settings ───────────────────────────────────── */}
         <Section id="response" title="Response Settings" icon={<MessageSquare size={18} />}>
           <div>
@@ -333,6 +360,17 @@ const SettingsView: React.FC = () => {
               ))}
             </div>
           </div>
+          <div>
+            <label className="text-xs text-slate-400 mb-2 block">Aspect Ratio</label>
+            <div className="flex gap-2">
+              {['1:1', '16:9', '9:16', '4:3'].map(ratio => (
+                <button key={ratio} onClick={() => updateSettings({ imageAspectRatio: ratio })}
+                  className={`flex-1 py-2.5 rounded-lg text-xs font-medium transition-colors ${settings.imageAspectRatio === ratio ? 'bg-indigo-600 text-white' : 'bg-slate-700/50 text-slate-400 hover:text-white'}`}>
+                  {ratio}
+                </button>
+              ))}
+            </div>
+          </div>
         </Section>
 
         {/* ── TTS ────────────────────────────────────────────────── */}
@@ -347,21 +385,36 @@ const SettingsView: React.FC = () => {
           {settings.tts.enabled && (
             <>
               <div>
-                <label className="text-xs text-slate-400 mb-1 block">Voice</label>
-                <select value={settings.tts.voice} onChange={(e) => updateSettings({ tts: { ...settings.tts, voice: e.target.value } })}
+                <label className="text-xs text-slate-400 mb-1 block">TTS Engine</label>
+                <select value={settings.tts.engine} onChange={(e) => updateSettings({ tts: { ...settings.tts, engine: e.target.value as 'browser' | 'huggingface' } })}
                   className="w-full bg-slate-700/50 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-600 focus:outline-none">
-                  <option value="">Auto-select</option>
-                  {voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                  <option value="browser">Browser TTS</option>
+                  <option value="huggingface">Hugging Face F5-TTS (Voice Clone)</option>
                 </select>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {settings.tts.engine === 'huggingface' ? 'Uses F5-TTS voice cloning. Requires HF API token.' : 'Uses your browser\'s built-in speech synthesis.'}
+                </p>
               </div>
+              {settings.tts.engine === 'browser' && (
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Voice</label>
+                  <select value={settings.tts.voice} onChange={(e) => updateSettings({ tts: { ...settings.tts, voice: e.target.value } })}
+                    className="w-full bg-slate-700/50 text-white text-xs rounded-lg px-3 py-2.5 border border-slate-600 focus:outline-none">
+                    <option value="">Auto-select</option>
+                    {voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Speed: {settings.tts.rate.toFixed(1)}x</label>
                 <input type="range" min={0.5} max={2} step={0.1} value={settings.tts.rate} onChange={(e) => updateSettings({ tts: { ...settings.tts, rate: parseFloat(e.target.value) } })} className="w-full accent-indigo-500" />
               </div>
-              <div>
-                <label className="text-xs text-slate-400 mb-1 block">Pitch: {settings.tts.pitch.toFixed(1)}</label>
-                <input type="range" min={0.5} max={2} step={0.1} value={settings.tts.pitch} onChange={(e) => updateSettings({ tts: { ...settings.tts, pitch: parseFloat(e.target.value) } })} className="w-full accent-indigo-500" />
-              </div>
+              {settings.tts.engine === 'browser' && (
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Pitch: {settings.tts.pitch.toFixed(1)}</label>
+                  <input type="range" min={0.5} max={2} step={0.1} value={settings.tts.pitch} onChange={(e) => updateSettings({ tts: { ...settings.tts, pitch: parseFloat(e.target.value) } })} className="w-full accent-indigo-500" />
+                </div>
+              )}
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Volume: {Math.round(settings.tts.volume * 100)}%</label>
                 <input type="range" min={0} max={1} step={0.1} value={settings.tts.volume} onChange={(e) => updateSettings({ tts: { ...settings.tts, volume: parseFloat(e.target.value) } })} className="w-full accent-indigo-500" />

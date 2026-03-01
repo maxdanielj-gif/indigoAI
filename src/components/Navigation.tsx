@@ -3,12 +3,13 @@ import { useAppContext } from '@/contexts/AppContext';
 import { ViewType } from '@/lib/types';
 import {
   MessageCircle, Image, Settings, Brain, BookOpen, Bot, User, X,
-  Cloud, CloudOff, Loader2, CheckCircle2, XCircle
+  Cloud, CloudOff, Loader2, CheckCircle2, XCircle, Sparkles
 } from 'lucide-react';
 
 const navItems: { view: ViewType; label: string; icon: React.ReactNode }[] = [
   { view: 'chat', label: 'Chat', icon: <MessageCircle size={20} /> },
   { view: 'gallery', label: 'Gallery', icon: <Image size={20} /> },
+  { view: 'generate', label: 'Generate', icon: <Sparkles size={20} /> },
   { view: 'memory', label: 'Memory', icon: <Brain size={20} /> },
   { view: 'journal', label: 'Journal', icon: <BookOpen size={20} /> },
   { view: 'ai-profile', label: 'AI Profile', icon: <Bot size={20} /> },

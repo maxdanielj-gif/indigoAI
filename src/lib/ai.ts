@@ -105,11 +105,124 @@ export async function sendChatMessage(
   }
 }
 
+export async function generateImageHuggingFace(
+  prompt: string,
+  aiProfile: AIProfile,
+  settings: AppSettings
+): Promise<string | null> {
+  if (!settings.hfApiKey) return null;
+
+  const stylePrefix = settings.imageStyle === 'photograph'
+    ? 'Photorealistic photograph, high quality DSLR photo, '
+    : settings.imageStyle === 'anime'
+    ? 'Anime style illustration, high quality anime art, '
+    : '';
+
+  const fullPrompt = `${stylePrefix}${aiProfile.appearance}. ${prompt}. ${settings.imageStyle !== 'anime' ? 'Photographic only, no CGI or artwork.' : ''}`;
+
+  const hfUrl = 'https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev';
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(hfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.hfApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: fullPrompt }),
+      });
+    } catch (directErr) {
+      console.warn('Direct HF fetch failed (likely CORS), attempting via proxy...', directErr);
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(hfUrl)}`;
+      response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.hfApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: fullPrompt }),
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 503) {
+        console.warn('HF FLUX model is loading, please try again shortly.');
+        return null;
+      }
+      throw new Error(`HF Image API Error: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error('HF Image generation failed:', error);
+    return null;
+  }
+}
+
+export async function generateVideoHuggingFace(
+  prompt: string,
+  settings: AppSettings
+): Promise<string | null> {
+  if (!settings.hfApiKey) return null;
+
+  const hfUrl = 'https://api-inference.huggingface.co/models/THUDM/CogVideoX-2b';
+
+  try {
+    let response: Response;
+    try {
+      response = await fetch(hfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.hfApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: prompt }),
+      });
+    } catch (directErr) {
+      console.warn('Direct HF fetch failed (likely CORS), attempting via proxy...', directErr);
+      const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(hfUrl)}`;
+      response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${settings.hfApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: prompt }),
+      });
+    }
+
+    if (!response.ok) {
+      if (response.status === 503) {
+        console.warn('HF CogVideo model is loading, please try again shortly.');
+        return null;
+      }
+      throw new Error(`HF Video API Error: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  } catch (error) {
+    console.error('HF Video generation failed:', error);
+    return null;
+  }
+}
+
 export async function generateImage(
   prompt: string,
   aiProfile: AIProfile,
   settings: AppSettings
 ): Promise<string | null> {
+  // Try HuggingFace FLUX first if HF API key is set and no separate image API key
+  if (settings.hfApiKey && !settings.imageApiKey) {
+    return generateImageHuggingFace(prompt, aiProfile, settings);
+  }
   if (!settings.imageApiKey) return null;
 
   const stylePrefix = settings.imageStyle === 'photograph'

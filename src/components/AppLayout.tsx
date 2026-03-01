@@ -8,6 +8,7 @@ import MemoryView from './MemoryView';
 import JournalView from './JournalView';
 import AIProfileView from './AIProfileView';
 import UserProfileView from './UserProfileView';
+import GenerateView from './GenerateView';
 import AuthModal from './AuthModal';
 
 const AppLayout: React.FC = () => {
@@ -31,6 +32,7 @@ const AppLayout: React.FC = () => {
     switch (currentView) {
       case 'chat': return <ChatView />;
       case 'gallery': return <GalleryView />;
+      case 'generate': return <GenerateView />;
       case 'settings': return <SettingsView />;
       case 'memory': return <MemoryView />;
       case 'journal': return <JournalView />;

@@ -8,6 +8,7 @@ export interface Message {
   fileContent?: string;
   fileName?: string;
   edited?: boolean;
+  videoUrl?: string;
 }
 
 export interface Memory {
@@ -60,12 +61,14 @@ export interface UserProfile {
 
 export interface TTSSettings {
   enabled: boolean;
+  engine: 'browser' | 'huggingface';
   voice: string;
   rate: number;
   pitch: number;
   volume: number;
   language: string;
   gender: 'male' | 'female' | 'neutral';
+  hfReferenceAudioUrl: string;
 }
 
 export interface AppSettings {
@@ -76,19 +79,21 @@ export interface AppSettings {
   autoSaveInterval: number; // minutes
   autoBackupInterval: number; // minutes
   imageStyle: 'photograph' | 'anime' | 'no_style';
+  imageAspectRatio: string;
   llmApiKey: string;
   llmApiUrl: string;
   llmModel: string;
   imageApiKey: string;
   imageApiUrl: string;
   imageModel: string;
+  hfApiKey: string;
   locationEnabled: boolean;
   notificationsEnabled: boolean;
   darkMode: boolean;
   syncEnabled: boolean;
 }
 
-export type ViewType = 'chat' | 'gallery' | 'settings' | 'memory' | 'journal' | 'ai-profile' | 'user-profile';
+export type ViewType = 'chat' | 'gallery' | 'generate' | 'settings' | 'memory' | 'journal' | 'ai-profile' | 'user-profile';
 
 
 export const DEFAULT_AI_PROFILE: AIProfile = {
@@ -109,12 +114,14 @@ export const DEFAULT_USER_PROFILE: UserProfile = {
 
 export const DEFAULT_TTS: TTSSettings = {
   enabled: false,
+  engine: 'browser',
   voice: '',
   rate: 1.0,
   pitch: 1.0,
   volume: 1.0,
   language: 'en-US',
   gender: 'female',
+  hfReferenceAudioUrl: 'https://raw.githubusercontent.com/maxdanielj-gif/voice-clone/main/Kelly_2.wav',
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -125,12 +132,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSaveInterval: 5,
   autoBackupInterval: 60,
   imageStyle: 'photograph',
+  imageAspectRatio: '1:1',
   llmApiKey: '',
   llmApiUrl: 'https://openrouter.ai/api/v1/chat/completions',
   llmModel: 'anthropic/claude-3.5-sonnet',
   imageApiKey: '',
   imageApiUrl: 'https://api.openai.com/v1/images/generations',
   imageModel: 'dall-e-3',
+  hfApiKey: '',
   locationEnabled: false,
   notificationsEnabled: false,
   darkMode: true,
