@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider } from './context/AppContext';
+import KeySelectionGuard from './components/KeySelectionGuard';
 import Layout from './components/Layout';
+import KeepAlive from './components/KeepAlive';
 import ChatScreen from './screens/ChatScreen';
 import AIProfileScreen from './screens/AIProfileScreen';
 import UserProfileScreen from './screens/UserProfileScreen';
@@ -13,21 +15,24 @@ import SettingsScreen from './screens/SettingsScreen';
 const App: React.FC = () => {
   return (
     <AppProvider>
-      <BrowserRouter>
-        <Layout>
-          <Routes>
-            <Route path="/" element={<ChatScreen />} />
-            <Route path="/chat" element={<ChatScreen />} />
-            <Route path="/ai-profile" element={<AIProfileScreen />} />
-            <Route path="/user-profile" element={<UserProfileScreen />} />
-            <Route path="/memory" element={<MemoryScreen />} />
-            <Route path="/gallery" element={<GalleryScreen />} />
-            <Route path="/image-generator" element={<ImageGeneratorScreen />} />
-            <Route path="/journal" element={<JournalScreen />} />
-            <Route path="/settings" element={<SettingsScreen />} />
-          </Routes>
-        </Layout>
-      </BrowserRouter>
+      <KeySelectionGuard>
+        <KeepAlive />
+        <BrowserRouter>
+          <Layout>
+            <Routes>
+              <Route path="/" element={<ChatScreen />} />
+              <Route path="/chat" element={<ChatScreen />} />
+              <Route path="/ai-profile" element={<AIProfileScreen />} />
+              <Route path="/user-profile" element={<UserProfileScreen />} />
+              <Route path="/memory" element={<MemoryScreen />} />
+              <Route path="/gallery" element={<GalleryScreen />} />
+              <Route path="/image-generator" element={<ImageGeneratorScreen />} />
+              <Route path="/journal" element={<JournalScreen />} />
+              <Route path="/settings" element={<SettingsScreen />} />
+            </Routes>
+          </Layout>
+        </BrowserRouter>
+      </KeySelectionGuard>
     </AppProvider>
   );
 };

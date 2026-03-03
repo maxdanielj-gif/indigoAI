@@ -1,6 +1,6 @@
 {
   "name": "Remix: indigoAI",
-  "description": "A customizable AI chatbot with persona management, memory, and multi-modal capabilities.",
+  "description": "A customizable AI chatbot with persona management, memory, multi-modal capabilities, and advanced API key management for Gemini, ElevenLabs, Hugging Face, Firebase, and Google Drive.",
   "requestFramePermissions": [
     "microphone",
     "camera",

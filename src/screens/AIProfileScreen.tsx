@@ -1,8 +1,29 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
-import { AIProfile } from '../types';
-import { Upload, Plus, Save, Trash2, Users, Play, Download } from 'lucide-react';
+import { AIProfile, BackgroundImage } from '../types';
+import { 
+  Upload, 
+  Plus, 
+  Save, 
+  Trash2, 
+  Users, 
+  Play, 
+  Download, 
+  Mic, 
+  Loader2, 
+  RotateCcw, 
+  HelpCircle,
+  Volume2,
+  Settings,
+  ChevronDown,
+  ChevronUp,
+  Image as ImageIcon,
+  MessageSquare,
+  X
+} from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
+import VoiceLab from '../components/VoiceLab';
+import PreviewChat from '../components/PreviewChat';
 
 // Utility function to convert base64 to ArrayBuffer
 const base64ToArrayBuffer = (base64: string) => {
@@ -16,7 +37,10 @@ const base64ToArrayBuffer = (base64: string) => {
 };
 
 const AIProfileScreen: React.FC = () => {
-  const { aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, apiKey, setAmbientMode, setAmbientFrequency, addToast } = useApp();
+  const { 
+    aiProfile, savePersona, deletePersona, savedPersonas, loadPersona, 
+    apiKey, elevenLabsApiKey, setAmbientMode, setAmbientFrequency, addToast 
+  } = useApp();
   const [name, setName] = useState(aiProfile.name);
   const [personality, setPersonality] = useState(aiProfile.personality);
   const [backstory, setBackstory] = useState(aiProfile.backstory);
@@ -26,6 +50,11 @@ const AIProfileScreen: React.FC = () => {
   const [voiceSpeed, setVoiceSpeed] = useState(aiProfile.voiceSpeed || 1.0);
   const [autoReadMessages, setAutoReadMessages] = useState(aiProfile.autoReadMessages || false);
   const [voiceGender, setVoiceGender] = useState<'male' | 'female' | 'none'>(aiProfile.voiceGender || 'none');
+  const [customVoiceSample, setCustomVoiceSample] = useState<string | null>(aiProfile.customVoiceSample || null);
+  const [voiceDescription, setVoiceDescription] = useState(aiProfile.voiceDescription || '');
+  const [voiceProvider, setVoiceProvider] = useState<'gemini' | 'elevenlabs'>(aiProfile.voiceProvider || 'gemini');
+  const [elevenLabsVoiceId, setElevenLabsVoiceId] = useState(aiProfile.elevenLabsVoiceId || null);
+  const [elevenLabsModelId, setElevenLabsModelId] = useState(aiProfile.elevenLabsModelId || 'eleven_multilingual_v2');
   const [responseLength, setResponseLength] = useState<AIProfile['responseLength']>(aiProfile.responseLength || 'medium');
   const [responseDetail, setResponseDetail] = useState<AIProfile['responseDetail']>(aiProfile.responseDetail || 'standard');
   const [responseTone, setResponseTone] = useState<AIProfile['responseTone']>(aiProfile.responseTone || 'friendly');
@@ -40,14 +69,17 @@ const AIProfileScreen: React.FC = () => {
   const [ambientModeState, setAmbientModeState] = useState<boolean>(aiProfile.ambientMode ?? false);
   const [ambientFrequencyState, setAmbientFrequencyState] = useState<AIProfile['ambientFrequency']>(aiProfile.ambientFrequency || 'off');
   const [aiCanGenerateImagesState, setAiCanGenerateImagesState] = useState<boolean>(aiProfile.aiCanGenerateImages ?? false);
+  const [imageStyle, setImageStyle] = useState<string>(aiProfile.imageStyle || 'none');
+  const [backgroundImages, setBackgroundImages] = useState<BackgroundImage[]>(aiProfile.backgroundImages || []);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [referenceImage, setReferenceImage] = useState<string | null>(aiProfile.referenceImage);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const backgroundInputRef = useRef<HTMLInputElement>(null);
   
   // Preview Chat State
   const [previewInput, setPreviewInput] = useState('');
-  const [previewMessages, setPreviewMessages] = useState<{role: 'user' | 'model', content: string}[]>([]);
+  const [previewMessages, setPreviewMessages] = useState<{role: 'user' | 'model', content: string, attachments?: {type: string, content: string, name: string}[]}[]>([]);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   const geminiVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
@@ -62,7 +94,52 @@ const AIProfileScreen: React.FC = () => {
     const isGeminiVoice = voiceURI && geminiVoices.includes(voiceURI);
     const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
 
-    if (isGeminiVoice) {
+    if (voiceProvider === 'elevenlabs' && elevenLabsVoiceId) {
+        const apiKeyEL = elevenLabsApiKey || import.meta.env.VITE_ELEVENLABS_API_KEY;
+        if (!apiKeyEL) {
+            alert("ElevenLabs API Key is missing. Please add it in Settings.");
+            setIsTestingVoice(false);
+            return;
+        }
+        try {
+            const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${elevenLabsVoiceId}`, {
+                method: 'POST',
+                headers: {
+                    'xi-api-key': apiKeyEL,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: elevenLabsModelId || 'eleven_multilingual_v2',
+                    voice_settings: {
+                        stability: 0.5,
+                        similarity_boost: 0.75
+                    }
+                })
+            });
+
+            if (response.ok) {
+                const audioBlob = await response.blob();
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
+                audio.playbackRate = voiceSpeed;
+                audio.play();
+                audio.onended = () => {
+                    setIsTestingVoice(false);
+                    URL.revokeObjectURL(audioUrl);
+                };
+            } else {
+                const errorData = await response.json();
+                console.error("ElevenLabs TTS failed:", errorData);
+                alert(`ElevenLabs TTS failed: ${errorData.detail?.message || 'Unknown error'}`);
+                setIsTestingVoice(false);
+            }
+        } catch (e) {
+            console.error("ElevenLabs TTS Error:", e);
+            alert("Failed to test ElevenLabs voice.");
+            setIsTestingVoice(false);
+        }
+    } else if (isGeminiVoice) {
         if (!effectiveApiKey) {
             alert("Gemini API Key is not configured. Please set it in Settings or ensure the default key is available.");
             setIsTestingVoice(false);
@@ -179,6 +256,11 @@ const AIProfileScreen: React.FC = () => {
     setVoiceSpeed(aiProfile.voiceSpeed || 1.0);
     setAutoReadMessages(aiProfile.autoReadMessages || false);
     setVoiceGender(aiProfile.voiceGender || 'none');
+    setCustomVoiceSample(aiProfile.customVoiceSample || null);
+    setVoiceDescription(aiProfile.voiceDescription || '');
+    setVoiceProvider(aiProfile.voiceProvider || 'gemini');
+    setElevenLabsVoiceId(aiProfile.elevenLabsVoiceId || null);
+    setElevenLabsModelId(aiProfile.elevenLabsModelId || 'eleven_multilingual_v2');
     setResponseLength(aiProfile.responseLength || 'medium'); // Load response length
     setProactiveMessageFrequency(aiProfile.proactiveMessageFrequency || 'off');
     setReferenceImage(aiProfile.referenceImage);
@@ -215,6 +297,11 @@ const AIProfileScreen: React.FC = () => {
       voiceSpeed,
       autoReadMessages,
       voiceGender,
+      customVoiceSample,
+      voiceDescription,
+      voiceProvider,
+      elevenLabsVoiceId,
+      elevenLabsModelId,
       responseLength,
       responseDetail,
       responseTone,
@@ -229,6 +316,8 @@ const AIProfileScreen: React.FC = () => {
       ambientMode: ambientModeState,
       ambientFrequency: ambientFrequencyState,
       aiCanGenerateImages: aiCanGenerateImagesState,
+      imageStyle,
+      backgroundImages,
       aiCanGenerateSpeech: aiProfile.aiCanGenerateSpeech,
       aiCanUseTools: aiProfile.aiCanUseTools,
       aiCanBrowse: aiProfile.aiCanBrowse,
@@ -254,6 +343,11 @@ const AIProfileScreen: React.FC = () => {
       voiceSpeed,
       autoReadMessages,
       voiceGender,
+      customVoiceSample,
+      voiceDescription,
+      voiceProvider,
+      elevenLabsVoiceId,
+      elevenLabsModelId,
       responseLength,
       responseDetail,
       responseTone,
@@ -268,6 +362,8 @@ const AIProfileScreen: React.FC = () => {
       ambientMode: aiProfile.ambientMode,
       ambientFrequency: aiProfile.ambientFrequency,
       aiCanGenerateImages: aiProfile.aiCanGenerateImages,
+      imageStyle,
+      backgroundImages,
       aiCanGenerateSpeech: aiProfile.aiCanGenerateSpeech,
       aiCanUseTools: aiProfile.aiCanUseTools,
       aiCanBrowse: aiProfile.aiCanBrowse,
@@ -304,6 +400,11 @@ const AIProfileScreen: React.FC = () => {
         voiceSpeed: 1.0,
         autoReadMessages: false,
         voiceGender: 'none',
+        customVoiceSample: null,
+        voiceDescription: '',
+        voiceProvider: 'gemini',
+        backgroundImages: [],
+        elevenLabsVoiceId: null,
         responseLength: 'medium',
         responseDetail: 'medium',
         responseTone: 'friendly',
@@ -329,7 +430,7 @@ const AIProfileScreen: React.FC = () => {
     loadPersona(newId);
   };
 
-  const handlePreviewSend = async () => {
+  const handlePreviewSend = useCallback(async () => {
     if (!previewInput.trim() || isPreviewLoading) return;
 
     const userMsg = { role: 'user' as const, content: previewInput };
@@ -350,6 +451,8 @@ const AIProfileScreen: React.FC = () => {
             Instructions:
             1. Stay in character at all times.
             2. This is a preview/test mode for the user to configure your personality.
+            ${aiCanGenerateImagesState ? "3. You can generate images by outputting [GENERATE_IMAGE: description]. Use this for selfies or showing things." : ""}
+            ${referenceImage ? "4. You have a reference image of yourself that will be used as a base whenever you generate images." : ""}
         `;
 
         const chat = aiClient.chats.create({
@@ -367,18 +470,55 @@ const AIProfileScreen: React.FC = () => {
         });
 
         const result = await chat.sendMessage({ message: userMsg.content });
-        const responseText = result.text;
+        let responseText = result.text;
 
-        setPreviewMessages(prev => [...prev, { role: 'model', content: responseText }]);
+        // Check for Image Generation Tag in Preview
+        const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/;
+        const match = responseText.match(imageTagRegex);
+        let attachments: {type: string, content: string, name: string}[] = [];
+
+        if (match && aiCanGenerateImagesState) {
+            const imageDescription = match[1];
+            responseText = responseText.replace(match[0], '').trim();
+            
+            try {
+                const imgRes = await fetch('/api/generate-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: imageDescription,
+                        aiProfile: { ...aiProfile, referenceImage, aiCanGenerateImages: aiCanGenerateImagesState },
+                        apiKey: apiKey || undefined,
+                        provider: 'gemini'
+                    }),
+                });
+
+                if (imgRes.ok) {
+                    const imgData = await imgRes.json();
+                    attachments.push({
+                        type: 'image',
+                        content: imgData.imageUrl,
+                        name: 'preview_generated.jpg'
+                    });
+                }
+            } catch (e: any) {
+                console.error("Preview image generation failed", e);
+                if (e.message?.includes("Requested entity was not found")) {
+                    window.dispatchEvent(new CustomEvent('aistudio:reset-key'));
+                }
+            }
+        }
+
+        setPreviewMessages(prev => [...prev, { role: 'model', content: responseText, attachments: attachments.length > 0 ? attachments : undefined }]);
     } catch (error) {
         console.error("Preview chat error", error);
         setPreviewMessages(prev => [...prev, { role: 'model', content: "Error: Failed to generate response. Please check your API key and settings." }]);
     } finally {
         setIsPreviewLoading(false);
     }
-  };
+  }, [previewInput, isPreviewLoading, apiKey, name, personality, backstory, appearance, responseLength, customParagraphCount, model, temperature, topK, topP, previewMessages]);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -416,9 +556,36 @@ const AIProfileScreen: React.FC = () => {
       };
       reader.readAsDataURL(file);
     }
-  };
+  }, []);
 
-  const handleExport = () => {
+  const handleBackgroundUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      const name = file.name.split('.')[0];
+      const newBackground: BackgroundImage = {
+        id: Date.now().toString(),
+        name: name.charAt(0).toUpperCase() + name.slice(1),
+        url: base64
+      };
+      setBackgroundImages(prev => [...prev, newBackground]);
+    };
+    reader.readAsDataURL(file);
+    if (backgroundInputRef.current) backgroundInputRef.current.value = '';
+  }, []);
+
+  const removeBackground = useCallback((id: string) => {
+    setBackgroundImages(prev => prev.filter(bg => bg.id !== id));
+  }, []);
+
+  const updateBackgroundName = useCallback((id: string, newName: string) => {
+    setBackgroundImages(prev => prev.map(bg => bg.id === id ? { ...bg, name: newName } : bg));
+  }, []);
+
+  const handleExport = useCallback(() => {
     try {
       const dataStr = JSON.stringify(aiProfile, null, 2);
       const blob = new Blob([dataStr], { type: "application/json" });
@@ -437,9 +604,9 @@ const AIProfileScreen: React.FC = () => {
       console.error("Persona export failed:", error);
       alert("Failed to export persona.");
     }
-  };
+  }, [aiProfile]);
 
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImport = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -466,7 +633,190 @@ const AIProfileScreen: React.FC = () => {
     reader.readAsText(file);
     // Reset input
     e.target.value = '';
-  };
+  }, [savePersona, loadPersona]);
+
+  const handleVoiceSampleUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+        if (file.size > 2 * 1024 * 1024) {
+            alert("Voice sample must be under 2MB.");
+            return;
+        }
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            setCustomVoiceSample(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+    }
+  }, []);
+
+  const [isAnalyzingVoice, setIsAnalyzingVoice] = useState(false);
+  const [isCloningVoice, setIsCloningVoice] = useState(false);
+  const [elevenLabsLibraryVoices, setElevenLabsLibraryVoices] = useState<any[]>([]);
+  const [isLoadingLibraryVoices, setIsLoadingLibraryVoices] = useState(false);
+  const [voiceTab, setVoiceTab] = useState<'gemini' | 'clone' | 'library'>(voiceProvider === 'elevenlabs' ? (elevenLabsVoiceId ? 'clone' : 'library') : 'gemini');
+
+  const fetchElevenLabsVoices = useCallback(async () => {
+    const apiKeyEL = elevenLabsApiKey || import.meta.env.VITE_ELEVENLABS_API_KEY;
+    if (!apiKeyEL) {
+        alert("ElevenLabs API Key is missing. Please add it in Settings.");
+        return;
+    }
+
+    setIsLoadingLibraryVoices(true);
+    try {
+        const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+            headers: { 'xi-api-key': apiKeyEL }
+        });
+        if (!response.ok) throw new Error("Failed to fetch voices");
+        const data = await response.json();
+        setElevenLabsLibraryVoices(data.voices || []);
+    } catch (error) {
+        console.error("Error fetching ElevenLabs voices:", error);
+        alert("Failed to load ElevenLabs voice library.");
+    } finally {
+        setIsLoadingLibraryVoices(false);
+    }
+  }, [elevenLabsApiKey]);
+
+  const handleCloneVoiceElevenLabs = useCallback(async () => {
+    if (!customVoiceSample || isCloningVoice) return;
+    
+    const apiKeyEL = elevenLabsApiKey || import.meta.env.VITE_ELEVENLABS_API_KEY;
+    if (!apiKeyEL) {
+        alert("ElevenLabs API Key is missing. Please add it in Settings.");
+        return;
+    }
+
+    setIsCloningVoice(true);
+    try {
+        // Convert base64 to Blob
+        const base64Data = customVoiceSample.split(',')[1];
+        const mimeType = customVoiceSample.split(';')[0].split(':')[1];
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+
+        const formData = new FormData();
+        formData.append('name', `${name} Voice`);
+        formData.append('files', blob, 'sample.mp3');
+        formData.append('description', `Cloned voice for ${name}. ${voiceDescription}`);
+
+        const response = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+            method: 'POST',
+            headers: {
+                'xi-api-key': apiKeyEL
+            },
+            body: formData
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.detail?.message || 'Failed to clone voice with ElevenLabs');
+        }
+
+        const data = await response.json();
+        const voiceId = data.voice_id;
+        setElevenLabsVoiceId(voiceId);
+        setVoiceProvider('elevenlabs');
+        
+        addToast({ 
+            title: "Voice Cloned", 
+            message: "True voice cloning successful! Your persona will now use this exact voice.", 
+            type: "success" 
+        });
+    } catch (error: any) {
+        console.error("ElevenLabs Cloning Error:", error);
+        alert(`Cloning failed: ${error.message}`);
+    } finally {
+        setIsCloningVoice(false);
+    }
+  }, [customVoiceSample, isCloningVoice, elevenLabsApiKey, name, voiceDescription, setElevenLabsVoiceId, setVoiceProvider, addToast]);
+
+  const handleAnalyzeVoice = useCallback(async () => {
+    if (!customVoiceSample || isAnalyzingVoice) return;
+    setIsAnalyzingVoice(true);
+
+    try {
+        const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+        if (!effectiveApiKey) {
+            alert("API Key required for voice analysis. Please check your settings.");
+            setIsAnalyzingVoice(false);
+            return;
+        }
+
+        const aiClient = new GoogleGenAI({ apiKey: effectiveApiKey });
+        const base64Data = customVoiceSample.split(',')[1];
+        const mimeType = customVoiceSample.split(';')[0].split(':')[1];
+
+        const response = await aiClient.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [
+                {
+                    parts: [
+                        { inlineData: { data: base64Data, mimeType } },
+                        { text: `You are a world-class voice analyst and audio engineer. 
+                        
+                        Carefully analyze the provided audio sample. Pay close attention to:
+                        - Gender and Age (e.g., young adult female, middle-aged male)
+                        - Accent and Dialect (e.g., Scottish, Southern American, British Received Pronunciation)
+                        - Tone and Texture (e.g., breathy, raspy, melodic, authoritative)
+                        - Pitch and Cadence
+                        
+                        Prebuilt Voice Reference:
+                        - Puck: Male, youthful, energetic, higher pitch.
+                        - Charon: Male, mature, calm, steady, neutral pitch.
+                        - Kore: Female, youthful, clear, friendly, bright.
+                        - Fenrir: Male, deep, rugged, authoritative, low pitch.
+                        - Zephyr: Female, soft, melodic, gentle, airy.
+                        
+                        Your goal is to find the best match among the prebuilt voices and suggest settings to mimic the sample as closely as possible.
+                        
+                        Return the result in JSON format with these exact keys:
+                        {
+                          "description": "A detailed 2-3 sentence description of the voice characteristics.",
+                          "suggestedVoice": "The name of the closest prebuilt voice (Puck, Charon, Kore, Fenrir, or Zephyr)",
+                          "suggestedPitch": 1.0, // A number between 0.5 and 2.0
+                          "suggestedSpeed": 1.0, // A number between 0.5 and 2.0
+                          "suggestedGender": "male" or "female"
+                        }` }
+                    ]
+                }
+            ],
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+
+        if (!response.text) {
+            throw new Error("No response from AI model.");
+        }
+
+        const analysis = JSON.parse(response.text.trim());
+        if (analysis.description) {
+            setVoiceDescription(analysis.description);
+            if (analysis.suggestedVoice) setVoiceURI(analysis.suggestedVoice);
+            if (analysis.suggestedPitch) setVoicePitch(analysis.suggestedPitch);
+            if (analysis.suggestedSpeed) setVoiceSpeed(analysis.suggestedSpeed);
+            if (analysis.suggestedGender) setVoiceGender(analysis.suggestedGender.toLowerCase());
+            
+            addToast({ 
+                title: "Voice Analyzed", 
+                message: "Custom voice profile updated based on your sample!", 
+                type: "success" 
+            });
+        }
+    } catch (error: any) {
+        console.error("Voice analysis failed:", error);
+        alert(`Failed to analyze voice sample: ${error.message || 'Unknown error'}. Please ensure your API key is correct and the audio file is valid.`);
+    } finally {
+        setIsAnalyzingVoice(false);
+    }
+  }, [customVoiceSample, isAnalyzingVoice, apiKey, setVoiceDescription, setVoiceURI, setVoicePitch, setVoiceSpeed, setVoiceGender, addToast]);
 
   return (
     <div className="flex flex-col lg:flex-row min-h-[calc(100vh-100px)] gap-4 p-4 sm:gap-6 sm:p-6 w-full mx-auto">
@@ -602,6 +952,90 @@ const AIProfileScreen: React.FC = () => {
                 />
                 </div>
 
+                {/* Background References Section */}
+                <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                                <ImageIcon className="w-4 h-4 text-indigo-600" />
+                                Background References
+                            </h3>
+                            <p className="text-xs text-gray-500">Upload images of rooms (bedroom, living room, etc.) for consistent backgrounds.</p>
+                        </div>
+                        <button
+                            onClick={() => backgroundInputRef.current?.click()}
+                            className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 bg-white px-2 py-1 rounded-md border border-indigo-100 shadow-sm"
+                        >
+                            <Plus className="w-3 h-3" />
+                            Add Room
+                        </button>
+                        <input
+                            type="file"
+                            ref={backgroundInputRef}
+                            onChange={handleBackgroundUpload}
+                            accept="image/*"
+                            className="hidden"
+                        />
+                    </div>
+
+                    {backgroundImages.length > 0 ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {backgroundImages.map((bg) => (
+                                <div key={bg.id} className="relative group bg-white p-2 rounded-lg border border-gray-200 shadow-sm">
+                                    <div className="aspect-video rounded-md overflow-hidden bg-gray-100 mb-2">
+                                        <img src={bg.url} alt={bg.name} className="w-full h-full object-cover" />
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={bg.name}
+                                        onChange={(e) => updateBackgroundName(bg.id, e.target.value)}
+                                        className="w-full text-[10px] font-medium text-gray-700 border-none p-0 focus:ring-0 text-center"
+                                        placeholder="Room Name"
+                                    />
+                                    <button
+                                        onClick={() => removeBackground(bg.id)}
+                                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center py-6 border-2 border-dashed border-gray-200 rounded-lg">
+                            <ImageIcon className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-xs text-gray-400">No background references added yet.</p>
+                        </div>
+                    )}
+                </div>
+
+                {/* Voice Lab Section */}
+                <VoiceLab 
+                  voiceProvider={voiceProvider}
+                  setVoiceProvider={setVoiceProvider}
+                  voiceTab={voiceTab}
+                  setVoiceTab={setVoiceTab}
+                  elevenLabsVoiceId={elevenLabsVoiceId}
+                  setElevenLabsVoiceId={setElevenLabsVoiceId}
+                  elevenLabsModelId={elevenLabsModelId}
+                  setElevenLabsModelId={setElevenLabsModelId}
+                  customVoiceSample={customVoiceSample}
+                  setCustomVoiceSample={setCustomVoiceSample}
+                  voiceDescription={voiceDescription}
+                  setVoiceDescription={setVoiceDescription}
+                  isAnalyzingVoice={isAnalyzingVoice}
+                  isCloningVoice={isCloningVoice}
+                  isLoadingLibraryVoices={isLoadingLibraryVoices}
+                  elevenLabsLibraryVoices={elevenLabsLibraryVoices}
+                  handleVoiceSampleUpload={handleVoiceSampleUpload}
+                  handleAnalyzeVoice={handleAnalyzeVoice}
+                  handleCloneVoiceElevenLabs={handleCloneVoiceElevenLabs}
+                  fetchElevenLabsVoices={fetchElevenLabsVoices}
+                  voiceSpeed={voiceSpeed}
+                />
+
+                {/* Advanced Model Settings */}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Response Detail</label>
@@ -732,6 +1166,21 @@ const AIProfileScreen: React.FC = () => {
                                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiCanGenerateImagesState ? 'translate-x-6' : 'translate-x-1'}`} />
                             </button>
                         </div>
+
+                        {aiCanGenerateImagesState && (
+                            <div className="mt-3">
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Image Generation Style</label>
+                                <select
+                                    value={imageStyle}
+                                    onChange={(e) => setImageStyle(e.target.value)}
+                                    className="w-full p-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                                >
+                                    <option value="none">None</option>
+                                    <option value="photograph">Photograph</option>
+                                    <option value="anime">Anime</option>
+                                </select>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -751,9 +1200,15 @@ const AIProfileScreen: React.FC = () => {
                             </select>
                         </div>
                         
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Temperature: {temperature}</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+                            <div className="relative group">
+                                <div className="flex items-center mb-1">
+                                    <label className="block text-xs font-medium text-gray-700">Temperature: {temperature}</label>
+                                    <HelpCircle className="w-3 h-3 text-gray-400 ml-1 cursor-help" />
+                                </div>
+                                <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                    Controls randomness. Lower values make responses more predictable and focused, while higher values make them more creative and varied.
+                                </div>
                                 <input
                                     type="range"
                                     min="0"
@@ -763,13 +1218,19 @@ const AIProfileScreen: React.FC = () => {
                                     onChange={(e) => setTemperature(parseFloat(e.target.value))}
                                     className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                                 />
-                                <div className="flex justify-between text-[10px] text-gray-400">
+                                <div className="flex justify-between text-[10px] text-gray-400 mt-1">
                                     <span>Precise</span>
                                     <span>Creative</span>
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Top K: {topK}</label>
+                            <div className="relative group">
+                                <div className="flex items-center mb-1">
+                                    <label className="block text-xs font-medium text-gray-700">Top K: {topK}</label>
+                                    <HelpCircle className="w-3 h-3 text-gray-400 ml-1 cursor-help" />
+                                </div>
+                                <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                    Limits the model's vocabulary choices to the top K most likely words at each step. Lower values reduce the chance of nonsensical words.
+                                </div>
                                 <input
                                     type="range"
                                     min="1"
@@ -777,11 +1238,17 @@ const AIProfileScreen: React.FC = () => {
                                     step="1"
                                     value={topK}
                                     onChange={(e) => setTopK(parseInt(e.target.value))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 mt-1"
                                 />
                             </div>
-                            <div>
-                                <label className="block text-xs font-medium text-gray-700 mb-1">Top P: {topP}</label>
+                            <div className="relative group">
+                                <div className="flex items-center mb-1">
+                                    <label className="block text-xs font-medium text-gray-700">Top P: {topP}</label>
+                                    <HelpCircle className="w-3 h-3 text-gray-400 ml-1 cursor-help" />
+                                </div>
+                                <div className="absolute bottom-full left-0 mb-2 w-48 p-2 bg-gray-800 text-white text-[10px] rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                    Selects words based on cumulative probability. A value of 0.9 means the model only considers the most likely words that make up 90% of the probability mass.
+                                </div>
                                 <input
                                     type="range"
                                     min="0"
@@ -789,7 +1256,7 @@ const AIProfileScreen: React.FC = () => {
                                     step="0.05"
                                     value={topP}
                                     onChange={(e) => setTopP(parseFloat(e.target.value))}
-                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 mt-1"
                                 />
                             </div>
                         </div>
@@ -931,75 +1398,15 @@ const AIProfileScreen: React.FC = () => {
                 </div>
 
                 {/* Preview Chat Section */}
-                <div className="mt-8 border-t-2 border-indigo-50 pt-6">
-                    <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center">
-                        <Play className="w-5 h-5 mr-2 text-indigo-500" />
-                        Test Persona Behavior
-                    </h3>
-                    <div className="bg-gray-50 rounded-lg border border-gray-200 h-64 flex flex-col">
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                            {previewMessages.length === 0 && (
-                                <p className="text-center text-gray-400 text-sm mt-10">
-                                    Start typing to test how {name} responds...
-                                </p>
-                            )}
-                            {previewMessages.map((msg, idx) => (
-                                <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                    <div className={`max-w-[80%] p-2 rounded-lg text-sm ${
-                                        msg.role === 'user' 
-                                        ? 'bg-indigo-600 text-white rounded-br-none' 
-                                        : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none'
-                                    }`}>
-                                        {msg.content}
-                                    </div>
-                                </div>
-                            ))}
-                            {isPreviewLoading && (
-                                <div className="flex justify-start">
-                                    <div className="bg-white border border-gray-200 p-2 rounded-lg rounded-bl-none">
-                                        <div className="flex space-x-1">
-                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75"></div>
-                                            <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                        <div className="p-3 border-t border-gray-200 bg-white rounded-b-lg">
-                            <form 
-                                onSubmit={(e) => {
-                                    e.preventDefault();
-                                    handlePreviewSend();
-                                }}
-                                className="flex space-x-2"
-                            >
-                                <input
-                                    type="text"
-                                    value={previewInput}
-                                    onChange={(e) => setPreviewInput(e.target.value)}
-                                    placeholder={`Message ${name}...`}
-                                    className="flex-1 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-                                />
-                                <button
-                                    type="submit"
-                                    disabled={isPreviewLoading || !previewInput.trim()}
-                                    className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium"
-                                >
-                                    Send
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setPreviewMessages([])}
-                                    className="text-gray-400 hover:text-red-500 px-2"
-                                    title="Clear Preview"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                </div>
+                <PreviewChat 
+                  name={name}
+                  previewMessages={previewMessages}
+                  isPreviewLoading={isPreviewLoading}
+                  previewInput={previewInput}
+                  setPreviewInput={setPreviewInput}
+                  handlePreviewSend={handlePreviewSend}
+                  setPreviewMessages={setPreviewMessages}
+                />
             </div>
         </div>
       </div>

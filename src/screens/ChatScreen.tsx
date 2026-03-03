@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink, Plus, MessageSquare, History, MoreVertical, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink, Plus, MessageSquare, History, MoreVertical, ChevronLeft, ChevronRight, Search, Star } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // Utility function to convert base64 to ArrayBuffer
@@ -15,7 +15,7 @@ const base64ToArrayBuffer = (base64: string) => {
 
 import { useApp } from '../context/AppContext';
 import { showNativeNotification } from '../services/firebaseService';
-import { cloneVoice } from '../services/huggingface';
+import ChatMessageItem from '../components/ChatMessageItem';
 import * as pdfjsLib from 'pdfjs-dist';
 
 // Configure PDF.js worker
@@ -24,10 +24,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs
 const ChatScreen: React.FC = () => {
   const { 
     aiProfile, userProfile, chatHistory, addChatMessage, updateChatMessage, 
-    deleteChatMessage, setChatHistory, clearHistory, knowledgeBase, 
+    deleteChatMessage, rateChatMessage, setChatHistory, clearHistory, knowledgeBase, 
     addToKnowledgeBase, addToGallery, apiKey, memories, journal, 
-    addJournalEntry, addMemory, showTimestamps, timeZone,
-    sessions, activeSessionId, createNewSession, switchSession, deleteSession, renameSession
+    addJournalEntry, addMemory, showTimestamps, timeZone, addToast,
+    sessions, activeSessionId, createNewSession, switchSession, deleteSession, renameSession,
+    openRouterApiKey
   } = useApp();
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -349,29 +350,48 @@ const ChatScreen: React.FC = () => {
     return () => { 
       if (cleanupFn) cleanupFn(); 
     };
-  }, [isLiveApiActive, apiKey, aiProfile.name, aiProfile.personality, aiProfile.voiceURI, aiProfile.voiceSpeed]);
+  }, [isLiveApiActive, apiKey, aiProfile.name, aiProfile.personality, aiProfile.voiceURI, aiProfile.voiceSpeed, aiProfile.voicePitch, aiProfile.voiceProvider, aiProfile.elevenLabsVoiceId]);
 
   // Text to Speech
   const speakMessage = async (text: string, messageId: string) => {
-    // Use Hugging Face F5-TTS if configured
-    if (aiProfile.hfApiKey && aiProfile.hfReferenceAudioUrl) {
-        try {
-            const audioBlob = await cloneVoice({
-                text: text.replace(/\*.*?\*/g, ''), // Remove asterisks for speech
-                referenceAudioUrl: aiProfile.hfReferenceAudioUrl,
-                token: aiProfile.hfApiKey
-            });
-            const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            audio.playbackRate = aiProfile.voiceSpeed;
-            audio.onended = () => {
-                setReadMessages(prev => new Set(prev).add(messageId));
-                URL.revokeObjectURL(audioUrl);
-            };
-            audio.play();
-            return;
-        } catch (err) {
-            console.error("HF TTS Error, falling back to other methods:", err);
+    // Check if we should use ElevenLabs
+    if (aiProfile.voiceProvider === 'elevenlabs' && aiProfile.elevenLabsVoiceId) {
+        const apiKeyEL = import.meta.env.VITE_ELEVENLABS_API_KEY;
+        if (apiKeyEL) {
+            try {
+                const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${aiProfile.elevenLabsVoiceId}`, {
+                    method: 'POST',
+                    headers: {
+                        'xi-api-key': apiKeyEL,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text,
+                        model_id: aiProfile.elevenLabsModelId || 'eleven_multilingual_v2',
+                        voice_settings: {
+                            stability: 0.5,
+                            similarity_boost: 0.75
+                        }
+                    })
+                });
+
+                if (response.ok) {
+                    const audioBlob = await response.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    audio.playbackRate = aiProfile.voiceSpeed || 1.0;
+                    audio.play();
+                    audio.onended = () => {
+                        setReadMessages(prev => new Set(prev).add(messageId));
+                        URL.revokeObjectURL(audioUrl);
+                    };
+                    return; // Success
+                } else {
+                    console.warn("ElevenLabs TTS failed, falling back to Gemini/Browser");
+                }
+            } catch (e) {
+                console.error("ElevenLabs TTS Error:", e);
+            }
         }
     }
 
@@ -424,7 +444,9 @@ const ChatScreen: React.FC = () => {
 
                     const source = audioContext.createBufferSource();
                     source.buffer = audioBuffer;
-                    source.playbackRate.value = aiProfile.voiceSpeed || 1.0;
+                    // Use a combination of speed and pitch for playback rate
+                    // Note: This will affect both speed and pitch simultaneously
+                    source.playbackRate.value = (aiProfile.voiceSpeed || 1.0) * (aiProfile.voicePitch || 1.0);
                     source.connect(audioContext.destination);
                     
                     // On mobile, we might need to resume the context
@@ -510,156 +532,29 @@ const ChatScreen: React.FC = () => {
 
   const generateResponse = async (history: typeof chatHistory, currentMessage: typeof chatHistory[0]) => {
     try {
-      // Construct System Instruction
-      let lengthInstruction = `Your response should be around ${aiProfile.responseLength} paragraphs long.`;
-      if (aiProfile.customParagraphCount) {
-        lengthInstruction = `Your response MUST be exactly ${aiProfile.customParagraphCount} paragraphs long.`;
-      } else if (aiProfile.customWordCount) {
-        lengthInstruction = `Your response MUST be approximately ${aiProfile.customWordCount} words long.`;
-      }
-
-      const now = new Date();
-      const timeContext = aiProfile.timeAwareness 
-        ? `\nCurrent Time Awareness:
-           The current date and time is ${now.toLocaleDateString()} ${now.toLocaleTimeString()}.
-           Please use this information if relevant to the conversation (e.g., greetings, time-sensitive topics).`
-        : '';
-
-      const systemInstruction = `
-        You are ${aiProfile.name}.
-        Personality: ${aiProfile.personality}
-        Backstory: ${aiProfile.backstory}
-        Appearance: ${aiProfile.appearance}
-        ${timeContext}
-        
-        Response Length Constraint: ${lengthInstruction}
-        Response Detail: ${aiProfile.responseDetail}
-        Response Tone: ${aiProfile.responseTone}
-        
-        User Profile Context:
-        Name: ${userProfile.name}
-        Bio/Info: ${userProfile.info}
-        Preferences: ${userProfile.preferences}
-        Appearance: ${userProfile.appearance}
-        User Reference Image: ${userProfile.referenceImage ? "User has provided a reference image. Consider this image when generating visual responses or understanding user's appearance." : "No user reference image provided."}
-        
-        Core Memories (Important facts to remember):
-        ${memories?.map(m => `- [Strength: ${m.strength}/10] ${m.content}`).join('\n') || 'No core memories yet.'}
-        
-        Instructions:
-        1. Contextual Chat: Use *asterisks* for actions/immersion (e.g., *smiles warmly*).
-        ${aiProfile.aiCanGenerateImages ? '2. Visual Generation: You can spontaneously send images to the user. To do this, output the tag [GENERATE_IMAGE: detailed description of the image] on a new line. Use this for selfies, scene visualizations, or when requested.' : ''}
-        3. Remember past interactions and user preferences.
-        
-        Knowledge Base Context:
-        ${knowledgeBase?.map(k => `File: ${k.name}\nContent: ${k.content.substring(0, 1000)}...`).join('\n\n') || ''}
-      `;
-
-      const aiClient = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY! });
-      
-      // Get location for Maps grounding if possible
-      let location = null;
-      try {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
-          });
-          location = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude
-          };
-      } catch (e) {
-          console.warn("Could not get location for Maps grounding", e);
-      }
-
-      const chat = aiClient.chats.create({
-        model: "gemini-2.5-flash", // Use 2.5 flash for Maps support
-        config: {
-          systemInstruction,
-          tools: [{ googleSearch: {} }, { googleMaps: {} }],
-          toolConfig: location ? {
-              retrievalConfig: {
-                  latLng: location
-              }
-          } : undefined,
-          temperature: aiProfile.temperature || 0.7,
-          topK: aiProfile.topK || 40,
-          topP: aiProfile.topP || 0.95,
-        }, 
-        history: history.slice(-20).map(msg => { // Limit history to last 20 messages to avoid token limits
-            const parts: any[] = [{ text: msg.content }];
-            msg.attachments?.forEach(att => {
-                if (att.type === 'image') {
-                    // Extract base64 data
-                    const base64Data = att.content.split(',')[1];
-                    parts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Data } });
-                } else if (att.type === 'pdf') {
-                    const base64Data = att.content.split(',')[1];
-                    parts.push({ inlineData: { mimeType: 'application/pdf', data: base64Data } });
-                } else if (att.type === 'text') {
-                    parts.push({ text: `\n[Attached File: ${att.name}]\n${att.content}` });
-                }
-            });
-            return {
-                role: msg.role,
-                parts,
-            };
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [...history.slice(-20), currentMessage].map(m => ({
+            role: m.role,
+            content: m.content
+          })),
+          aiProfile,
+          userProfile,
+          apiKey: apiKey || undefined,
+          openRouterKey: openRouterApiKey || undefined,
+          provider: aiProfile.llmProvider || 'gemini'
         }),
       });
 
-      // Prepare current message parts with Contextual Mode awareness
-      let contentToSend = currentMessage.content;
-      const hasAction = /\*.*?\*/.test(contentToSend);
-      const hasOOC = /\(.*?\)/.test(contentToSend);
-      
-
-      if (hasAction) {
-          contentToSend += "\n\n[SYSTEM NOTE: User included roleplay actions in asterisks. React to these actions vividly within your character's behavior.]";
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to generate response.");
       }
 
-      const currentParts: any[] = [{ text: contentToSend }];
-
-      // Add user's reference image to the current parts if available
-      if (userProfile.referenceImage) {
-        try {
-          const matches = userProfile.referenceImage.match(/^data:(.+);base64,(.+)$/);
-          if (matches && matches.length === 3) {
-            const mimeType = matches[1];
-            const base64Data = matches[2];
-            currentParts.push({ inlineData: { mimeType, data: base64Data } });
-          }
-        } catch (e) {
-          console.error("Error parsing user reference image for AI context", e);
-        }
-      }
-
-      currentMessage.attachments?.forEach(att => {
-          if (att.type === 'image') {
-              const base64Data = att.content.split(',')[1];
-              currentParts.push({ inlineData: { mimeType: 'image/jpeg', data: base64Data } });
-          } else if (att.type === 'pdf') {
-              const base64Data = att.content.split(',')[1];
-              currentParts.push({ inlineData: { mimeType: 'application/pdf', data: base64Data } });
-          } else if (att.type === 'text') {
-              currentParts.push({ text: `\n[Attached File: ${att.name}]\n${att.content}` });
-          }
-      });
-      
-      const result = await chat.sendMessage({ message: currentParts });
-      let responseText = result.text;
-      
-      // Extract grounding URLs
-      const groundingUrls: { title: string; url: string }[] = [];
-      const chunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (chunks) {
-          chunks.forEach((chunk: any) => {
-              if (chunk.web) {
-                  groundingUrls.push({ title: chunk.web.title, url: chunk.web.uri });
-              }
-              if (chunk.maps) {
-                  groundingUrls.push({ title: chunk.maps.title || "Google Maps", url: chunk.maps.uri });
-              }
-          });
-      }
+      const data = await res.json();
+      let responseText = data.content;
       
       // Check for Image Generation Tag
       const imageTagRegex = /\[GENERATE_IMAGE:\s*(.*?)\]/;
@@ -667,76 +562,35 @@ const ChatScreen: React.FC = () => {
       
       if (match && aiProfile.aiCanGenerateImages) {
           const imageDescription = match[1];
-          // Remove tag from text display
           responseText = responseText.replace(match[0], '').trim();
           
-          // Generate Image
           try {
-             if (!apiKey || !(await (window as any).aistudio.hasSelectedApiKey())) {
-                 alert('Please select an API key for image generation in settings. You may need a paid Google Cloud project. See billing documentation: ai.google.dev/gemini-api/docs/billing');
-                 await (window as any).aistudio.openSelectKey();
-                 setIsLoading(false);
-                 return;
-             }
-             const imageAiClient = new GoogleGenAI({ apiKey: apiKey || process.env.GEMINI_API_KEY! });
-             
-             // Construct full prompt with AI appearance (matching ImageGeneratorScreen logic)
-             const fullPrompt = `Generate an image of ${imageDescription}. The character in the image MUST resemble this description: ${aiProfile.appearance}`;
-
-             const parts: any[] = [{ text: fullPrompt }];
-
-             // Add reference image if available
-             if (aiProfile.referenceImage) {
-               try {
-                   const matches = aiProfile.referenceImage.match(/^data:(.+);base64,(.+)$/);
-                   if (matches && matches.length === 3) {
-                       const mimeType = matches[1];
-                       const base64Data = matches[2];
-                       parts.push({ inlineData: { mimeType, data: base64Data } });
-                   }
-               } catch (e) {
-                   console.error("Error parsing reference image", e);
-               }
-             }
-
-             const imageGenerationResponse = await imageAiClient.models.generateContent({
-                 model: 'gemini-2.5-flash-image', // Use default image generation model
-                 contents: { parts },
-                 config: {
-                     imageConfig: {
-                         aspectRatio: '1:1'
-                     },
-                 },
+             const imgRes = await fetch('/api/generate-image', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({
+                 prompt: imageDescription,
+                 aiProfile,
+                 apiKey: apiKey || undefined,
+                 provider: aiProfile.imageProvider || 'gemini'
+               }),
              });
 
-             let imageUrl = '';
-             if (imageGenerationResponse.candidates?.[0]?.content?.parts) {
-                 for (const part of imageGenerationResponse.candidates[0].content.parts) {
-                     if (part.inlineData) {
-                         imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-                         break;
-                     } else if (part.text) {
-                         console.warn("Image generation model returned text:", part.text);
-                     }
-                 }
-             }
+             if (!imgRes.ok) throw new Error(await imgRes.text());
+             const imgData = await imgRes.json();
+             const imageUrl = imgData.imageUrl;
              
-             if (!imageUrl) {
-                 throw new Error('No image data received from Gemini API.');
-             }
-             
-             // Add image message as a separate message, with content being the description
              const imageMsgId = (Date.now() + 2).toString();
              addChatMessage({
                  id: imageMsgId,
                  role: 'model',
                  content: `*Generated image: ${imageDescription}*`,
                  timestamp: Date.now(),
-                 attachments: imageUrl ? [{
+                 attachments: [{
                      type: 'image',
                      content: imageUrl,
                      name: 'generated_image.jpg'
-                 }] : []
+                 }]
              });
              
              addToGallery({
@@ -747,8 +601,11 @@ const ChatScreen: React.FC = () => {
                  timestamp: Date.now()
              });
              
-          } catch (e) {
+          } catch (e: any) {
               console.error("Image generation failed", e);
+              if (e.message?.includes("Requested entity was not found")) {
+                  window.dispatchEvent(new CustomEvent('aistudio:reset-key'));
+              }
               addChatMessage({
                   id: (Date.now() + 3).toString(),
                   role: 'model',
@@ -763,16 +620,14 @@ const ChatScreen: React.FC = () => {
         role: 'model' as const,
         content: responseText,
         timestamp: Date.now(),
-        read: false, // Mark as unread initially
-        groundingUrls: groundingUrls.length > 0 ? groundingUrls : undefined,
+        read: false,
       };
 
       addChatMessage(modelMessage);
-
+      
       if (aiProfile.autoReadMessages) {
         speakMessage(responseText, modelMessage.id);
       } else {
-        // Mark as read if auto-read is off
         setReadMessages(prev => new Set(prev).add(modelMessage.id));
       }
 
@@ -780,29 +635,11 @@ const ChatScreen: React.FC = () => {
       generateReflections(history, currentMessage, modelMessage);
 
     } catch (error: any) {
-      console.error('Error generating response:', error);
-      let errorMessage = "I'm sorry, I encountered an error processing your request.";
-      
-      if (error.message) {
-        try {
-          const parsed = JSON.parse(error.message);
-          if (parsed.error && parsed.error.message) {
-            errorMessage = `AI Error: ${parsed.error.message}`;
-          }
-        } catch (e) {
-          if (error.message.includes("API key expired")) {
-            errorMessage = "AI Error: The Gemini API key has expired. Please check your settings or contact support.";
-          } else {
-            errorMessage = `AI Error: ${error.message}`;
-          }
-        }
-      }
-
-      addChatMessage({
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        role: 'model',
-        content: errorMessage,
-        timestamp: Date.now(),
+      console.error("Error generating response:", error);
+      addToast({ 
+        title: "Generation Error", 
+        message: error.message || "Failed to get a response from the AI.", 
+        type: "error" 
       });
     } finally {
       setIsLoading(false);
@@ -993,6 +830,14 @@ const ChatScreen: React.FC = () => {
 
   return (
     <div className="flex h-full bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200 relative">
+      {/* Sessions Sidebar Overlay (Mobile) */}
+      {isSessionsSidebarOpen && (
+        <div 
+          className="absolute inset-0 bg-black/50 z-20 lg:hidden"
+          onClick={() => setIsSessionsSidebarOpen(false)}
+        />
+      )}
+
       {/* Sessions Sidebar */}
       <div className={`
         absolute inset-y-0 left-0 z-30 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out
@@ -1019,7 +864,10 @@ const ChatScreen: React.FC = () => {
                             group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors
                             ${activeSessionId === session.id ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800/50 hover:text-gray-200'}
                         `}
-                        onClick={() => switchSession(session.id)}
+                        onClick={() => {
+                            switchSession(session.id);
+                            if (window.innerWidth < 1024) setIsSessionsSidebarOpen(false);
+                        }}
                     >
                         <div className="flex items-center space-x-3 overflow-hidden flex-1">
                             <MessageSquare className="w-4 h-4 flex-shrink-0" />
@@ -1098,6 +946,33 @@ const ChatScreen: React.FC = () => {
                 >
                     <Camera className="w-4 h-4" />
                 </button>
+                <button
+                    onClick={() => {
+                        if (!aiProfile.aiCanGenerateImages) {
+                            addToast({
+                                title: "Image Generation Disabled",
+                                message: "Please enable 'AI Can Generate Images' in the AI Profile settings first.",
+                                type: 'warning'
+                            });
+                            return;
+                        }
+                        const userMsgId = Date.now().toString() + Math.random().toString(36).substr(2, 9);
+                        const userMessage = {
+                          id: userMsgId,
+                          role: 'user' as const,
+                          content: "Can you send me a picture of yourself? [SYSTEM NOTE: You MUST use the [GENERATE_IMAGE: detailed description] tag now to send a picture. Do not refuse.]",
+                          timestamp: Date.now(),
+                          attachments: [],
+                        };
+                        addChatMessage(userMessage);
+                        setIsLoading(true);
+                        generateResponse(chatHistory, userMessage);
+                    }}
+                    className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
+                    title="Request Picture"
+                >
+                    <ImageIcon className="w-4 h-4" />
+                </button>
             </div>
             <div className="flex space-x-2 items-center">
                 <button
@@ -1118,136 +993,33 @@ const ChatScreen: React.FC = () => {
         
       <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gray-50">
         {chatHistory?.map((msg) => (
-          <div
+          <ChatMessageItem
             key={msg.id}
-            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div className={`flex flex-col max-w-[85%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                <div
-                className={`p-4 rounded-2xl shadow-sm relative group ${
-                    msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none border border-gray-100'
-                }`}
-                >
-                {/* Attachments */}
-                {msg.attachments && msg.attachments.length > 0 && (
-                    <div className="mb-3 space-y-2">
-                        {msg.attachments.map((att, idx) => (
-                            <div key={idx} className="rounded-lg overflow-hidden">
-                                {att.type === 'image' ? (
-                                    <img src={att.content} alt="Attachment" className="max-w-full h-auto rounded" referrerPolicy="no-referrer" />
-                                ) : (
-                                    <div className="bg-black/10 p-2 rounded text-xs flex items-center">
-                                        <FileText className="w-4 h-4 mr-1" />
-                                        {att.name} {att.type === 'pdf' ? '(PDF)' : ''}
-                                    </div>
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Content */}
-                {editingMessageId === msg.id ? (
-                    <div className="w-full min-w-[200px]">
-                        <textarea 
-                            id={`edit-message-${msg.id}`}
-                            className="w-full p-2 text-gray-800 rounded bg-white border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none"
-                            defaultValue={msg.content}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleEdit(msg.id, e.currentTarget.value);
-                                } else if (e.key === 'Escape') {
-                                    setEditingMessageId(null);
-                                }
-                            }}
-                            autoFocus
-                        />
-                        <div className="flex justify-end space-x-2 mt-2">
-                            <button 
-                                onClick={() => setEditingMessageId(null)}
-                                className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button 
-                                onClick={() => {
-                                    const el = document.getElementById(`edit-message-${msg.id}`) as HTMLTextAreaElement;
-                                    if (el) handleEdit(msg.id, el.value);
-                                }}
-                                className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors"
-                            >
-                                Save
-                            </button>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="whitespace-pre-wrap leading-relaxed">
-                        {msg.content.split(/(\*.*?\*|\(.*?\))/g).map((part, i) => {
-                            if (part.startsWith('*') && part.endsWith('*')) {
-                                return <span key={i} className="italic text-indigo-400">{part}</span>;
-                            } else if (part.startsWith('(') && part.endsWith(')')) {
-                                return <span key={i} className="text-xs text-gray-400">{part}</span>;
-                            }
-                            return <span key={i}>{part}</span>;
-                        })}
-                    </div>
-                )}
-
-                {/* Grounding URLs */}
-                {msg.groundingUrls && msg.groundingUrls.length > 0 && (
-                    <div className="mt-3 pt-2 border-t border-gray-100 flex flex-wrap gap-2">
-                        {msg.groundingUrls.map((link, idx) => (
-                            <a 
-                                key={idx} 
-                                href={link.url} 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded hover:bg-indigo-100 transition-colors flex items-center"
-                            >
-                                <ExternalLink className="w-3 h-3 mr-1" />
-                                {link.title || "Source"}
-                            </a>
-                        ))}
-                    </div>
-                )}
-
-                {/* Message Actions */}
-                <div className={`flex items-center justify-end mt-2 pt-2 border-t space-x-1 ${msg.role === 'user' ? 'border-indigo-500/30 text-indigo-100' : 'border-gray-100 text-gray-400'}`}>
-                    <button onClick={() => speakMessage(msg.content, msg.id)} className={`p-1.5 rounded hover:bg-black/10 transition-colors`} title="Read Aloud">
-                        <Volume2 className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => setEditingMessageId(msg.id)} className={`p-1.5 rounded hover:bg-black/10 transition-colors`} title="Edit Message">
-                        <Edit2 className="w-4 h-4" />
-                    </button>
-                    {msg.role === 'model' && (
-                        <button onClick={() => handleRegenerate(msg.id)} className={`p-1.5 rounded hover:bg-black/10 transition-colors`} title="Regenerate Response">
-                            <RotateCcw className="w-4 h-4" />
-                        </button>
-                    )}
-                    <button onClick={() => handleDeleteMessage(msg.id)} className={`p-1.5 rounded hover:bg-black/10 transition-colors hover:text-red-500`} title="Delete Message">
-                        <Trash2 className="w-4 h-4" />
-                    </button>
-                </div>
-                </div>
-                {showTimestamps && (
-                    <span className="text-xs text-gray-400 mt-1 px-1 flex items-center space-x-1">
-                        <span>
-                            {new Date(msg.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', timeZone })} {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone })}
-                        </span>
-                        {msg.role === 'model' && readMessages.has(msg.id) && <span title="Read"><CheckCheck className="w-3 h-3 text-indigo-500" /></span>}
-                    </span>
-                )}
-            </div>
-          </div>
+            msg={msg}
+            editingMessageId={editingMessageId}
+            setEditingMessageId={setEditingMessageId}
+            handleEdit={handleEdit}
+            rateChatMessage={rateChatMessage}
+            speakMessage={speakMessage}
+            handleRegenerate={handleRegenerate}
+            handleDeleteMessage={handleDeleteMessage}
+            showTimestamps={showTimestamps}
+            timeZone={timeZone}
+            readMessages={readMessages}
+          />
         ))}
         {isLoading && (
           <div className="flex justify-start">
-            <div className="bg-white p-4 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 flex items-center space-x-2">
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-              <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            <div className="flex flex-col space-y-1">
+              <div className="bg-white p-4 rounded-2xl rounded-bl-none shadow-sm border border-gray-100 flex items-center space-x-2">
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
+              <div className="flex items-center text-[10px] text-indigo-500 font-medium px-2 animate-pulse">
+                <Search className="w-3 h-3 mr-1" />
+                Fact Checking Active...
+              </div>
             </div>
           </div>
         )}

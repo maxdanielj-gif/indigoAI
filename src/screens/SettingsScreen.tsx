@@ -1,11 +1,16 @@
 import React, { useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { requestNotificationPermission, showNativeNotification } from '../services/firebaseService';
-import { Download, Upload, Trash2, Bell, FileText, File, Key, HelpCircle, Save, Database, MapPin, Copy, Smartphone, Cloud, RefreshCw, LogOut, Clock } from 'lucide-react';
+import { Download, Upload, Trash2, Bell, FileText, File, Key, HelpCircle, Save, Database, MapPin, Copy, Smartphone, Cloud, RefreshCw, LogOut, Clock, Shield } from 'lucide-react';
 
 const SettingsScreen: React.FC = () => {
   const { 
     importData, knowledgeBase, addToKnowledgeBase, apiKey, setApiKey, 
+    elevenLabsApiKey, setElevenLabsApiKey, huggingFaceApiKey, setHuggingFaceApiKey,
+    openRouterApiKey, setOpenRouterApiKey,
+    firebaseApiKey, firebaseProjectId, firebaseAppId, firebaseMessagingSenderId, firebaseVapidKey, setFirebaseConfig,
+    firebaseServiceAccountKey, setFirebaseServiceAccountKey,
+    googleClientId, googleClientSecret, setGoogleConfig,
     setShowTutorial, autoSaveChat, setAutoSaveChat, autoSaveChatInterval, 
     setAutoSaveChatInterval, autoJsonBackup, setAutoJsonBackup, 
     autoJsonBackupInterval, setAutoJsonBackupInterval, resetApp, chatHistory, 
@@ -18,14 +23,28 @@ const SettingsScreen: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const kbInputRef = useRef<HTMLInputElement>(null);
   const [localApiKey, setLocalApiKey] = useState(apiKey || '');
-  const [localHfApiKey, setLocalHfApiKey] = useState(aiProfile.hfApiKey || '');
-  const [localHfReferenceAudioUrl, setLocalHfReferenceAudioUrl] = useState(aiProfile.hfReferenceAudioUrl || 'https://raw.githubusercontent.com/maxdanielj-gif/voice-clone/main/Kelly_2.wav');
+  const [localElevenLabsKey, setLocalElevenLabsKey] = useState(elevenLabsApiKey || '');
+  const [localHuggingFaceKey, setLocalHuggingFaceKey] = useState(huggingFaceApiKey || '');
+  const [localOpenRouterKey, setLocalOpenRouterKey] = useState(openRouterApiKey || '');
+  
+  const [localFirebaseApiKey, setLocalFirebaseApiKey] = useState(firebaseApiKey || '');
+  const [localFirebaseProjectId, setLocalFirebaseProjectId] = useState(firebaseProjectId || '');
+  const [localFirebaseAppId, setLocalFirebaseAppId] = useState(firebaseAppId || '');
+  const [localFirebaseMessagingSenderId, setLocalFirebaseMessagingSenderId] = useState(firebaseMessagingSenderId || '');
+  const [localFirebaseVapidKey, setLocalFirebaseVapidKey] = useState(firebaseVapidKey || '');
+  const [localFirebaseServiceAccountKey, setLocalFirebaseServiceAccountKey] = useState(firebaseServiceAccountKey || '');
+  const [localGoogleClientId, setLocalGoogleClientId] = useState(googleClientId || '');
+  const [localGoogleClientSecret, setLocalGoogleClientSecret] = useState(googleClientSecret || '');
   const [driveFiles, setDriveFiles] = useState<any[]>([]);
   const [isFetchingDrive, setIsFetchingDrive] = useState(false);
 
   const handleGoogleDriveConnect = async () => {
     try {
-      const res = await fetch('/api/auth/google/url');
+      const params = new URLSearchParams();
+      if (googleClientId) params.append('clientId', googleClientId);
+      if (googleClientSecret) params.append('clientSecret', googleClientSecret);
+      
+      const res = await fetch(`/api/auth/google/url?${params.toString()}`);
       const { url } = await res.json();
       window.open(url, 'google_oauth', 'width=600,height=700');
     } catch (e) {
@@ -46,7 +65,11 @@ const SettingsScreen: React.FC = () => {
   const fetchDriveFiles = async () => {
     setIsFetchingDrive(true);
     try {
-      const res = await fetch('/api/drive/files');
+      const params = new URLSearchParams();
+      if (googleClientId) params.append('clientId', googleClientId);
+      if (googleClientSecret) params.append('clientSecret', googleClientSecret);
+      
+      const res = await fetch(`/api/drive/files?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setDriveFiles(data.files || []);
@@ -60,7 +83,11 @@ const SettingsScreen: React.FC = () => {
 
   const importFromDrive = async (fileId: string) => {
     try {
-      const res = await fetch(`/api/drive/file/${fileId}`);
+      const params = new URLSearchParams();
+      if (googleClientId) params.append('clientId', googleClientId);
+      if (googleClientSecret) params.append('clientSecret', googleClientSecret);
+      
+      const res = await fetch(`/api/drive/file/${fileId}?${params.toString()}`);
       if (res.ok) {
         const { name, content } = await res.json();
         addToKnowledgeBase({ name, content });
@@ -151,19 +178,54 @@ const SettingsScreen: React.FC = () => {
       addToast({ title: "Saved", message: "Gemini API Key saved successfully!", type: "success" });
   };
 
-  const handleSaveHfSettings = () => {
-      const updatedProfile = { 
-        ...aiProfile, 
-        hfApiKey: localHfApiKey.trim() || null,
-        hfReferenceAudioUrl: localHfReferenceAudioUrl.trim() || null
-      };
-      // Assuming setAIProfile is available in useApp
-      (useApp() as any).setAIProfile(updatedProfile);
-      addToast({ title: "Saved", message: "Hugging Face settings saved successfully!", type: "success" });
+  const handleSaveElevenLabsKey = () => {
+      setElevenLabsApiKey(localElevenLabsKey.trim() || null);
+      addToast({ title: "Saved", message: "ElevenLabs API Key saved successfully!", type: "success" });
+  };
+
+  const handleSaveHuggingFaceKey = () => {
+      setHuggingFaceApiKey(localHuggingFaceKey.trim() || null);
+      addToast({ title: "Saved", message: "Hugging Face API Key saved successfully!", type: "success" });
+  };
+
+  const handleSaveOpenRouterKey = () => {
+      setOpenRouterApiKey(localOpenRouterKey.trim() || null);
+      addToast({ title: "Saved", message: "OpenRouter API Key saved successfully!", type: "success" });
+  };
+
+  const handleSaveFirebaseConfig = () => {
+      setFirebaseConfig({
+          apiKey: localFirebaseApiKey.trim() || null,
+          projectId: localFirebaseProjectId.trim() || null,
+          appId: localFirebaseAppId.trim() || null,
+          messagingSenderId: localFirebaseMessagingSenderId.trim() || null,
+          vapidKey: localFirebaseVapidKey.trim() || null,
+      });
+      addToast({ title: "Saved", message: "Firebase configuration saved successfully!", type: "success" });
+  };
+
+  const handleSaveFirebaseServiceAccount = () => {
+      setFirebaseServiceAccountKey(localFirebaseServiceAccountKey.trim() || null);
+      addToast({ title: "Saved", message: "Firebase Service Account Key saved successfully!", type: "success" });
+  };
+
+  const handleSaveGoogleConfig = () => {
+      setGoogleConfig({
+          clientId: localGoogleClientId.trim() || null,
+          clientSecret: localGoogleClientSecret.trim() || null,
+      });
+      addToast({ title: "Saved", message: "Google Drive API configuration saved successfully!", type: "success" });
   };
 
   const handleEnablePushNotifications = async () => {
-    const result = await requestNotificationPermission();
+    const config = (firebaseApiKey && firebaseProjectId && firebaseAppId && firebaseMessagingSenderId) ? {
+        apiKey: firebaseApiKey,
+        projectId: firebaseProjectId,
+        appId: firebaseAppId,
+        messagingSenderId: firebaseMessagingSenderId,
+    } : undefined;
+
+    const result = await requestNotificationPermission(config, firebaseVapidKey || undefined);
     if (result.success && result.token) {
       setFcmToken(result.token);
       addToast({
@@ -383,8 +445,14 @@ const SettingsScreen: React.FC = () => {
       if (res.ok) {
         addToast({ title: "Backup Successful", message: "App data successfully backed up to Google Drive!", type: "success" });
       } else {
-        const error = await res.json();
-        addToast({ title: "Backup Failed", message: `Failed to backup to Google Drive: ${error.error || 'Unknown error'}`, type: "error" });
+        let errorData;
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          errorData = await res.json();
+        } else {
+          errorData = { error: await res.text() };
+        }
+        addToast({ title: "Backup Failed", message: `Failed to backup to Google Drive: ${errorData.error || 'Unknown error'}`, type: "error" });
       }
     } catch (e: any) {
       console.error("Manual Google Drive backup failed:", e);
@@ -400,7 +468,8 @@ const SettingsScreen: React.FC = () => {
         {/* API Key Management */}
         <section>
             <h3 className="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">API Configuration</h3>
-            <div className="space-y-4">
+            <div className="space-y-6">
+                {/* Gemini */}
                 <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Gemini API Key (Optional)</label>
                     <div className="flex space-x-2">
@@ -420,43 +489,220 @@ const SettingsScreen: React.FC = () => {
                             onClick={handleSaveApiKey}
                             className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
                         >
-                            Save Key
+                            Save
                         </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">
-                        Leave empty to use the default system key. Providing your own key allows for higher rate limits and custom usage.
-                    </p>
                 </div>
 
-                <div className="pt-4 border-t border-gray-100">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Hugging Face API Token (for Voice/Image/Video)</label>
-                    <div className="flex space-x-2 mb-4">
-                        <input
-                            type="password"
-                            value={localHfApiKey}
-                            onChange={(e) => setLocalHfApiKey(e.target.value)}
-                            className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            placeholder="Enter your HF Token (hf_...)"
-                        />
-                    </div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Voice Clone Reference Audio URL</label>
+                {/* ElevenLabs */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">ElevenLabs API Key (Optional)</label>
                     <div className="flex space-x-2">
-                        <input
-                            type="text"
-                            value={localHfReferenceAudioUrl}
-                            onChange={(e) => setLocalHfReferenceAudioUrl(e.target.value)}
-                            className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                            placeholder="https://.../voice.wav"
-                        />
+                        <div className="relative flex-1">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Key className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                                type="password"
+                                value={localElevenLabsKey}
+                                onChange={(e) => setLocalElevenLabsKey(e.target.value)}
+                                className="pl-10 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                placeholder="Enter your ElevenLabs API Key"
+                            />
+                        </div>
                         <button
-                            onClick={handleSaveHfSettings}
+                            onClick={handleSaveElevenLabsKey}
                             className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
                         >
-                            Save HF
+                            Save
                         </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">Used for F5-TTS voice cloning.</p>
                 </div>
+
+                {/* Hugging Face */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Hugging Face API Key (Optional)</label>
+                    <div className="flex space-x-2">
+                        <div className="relative flex-1">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Key className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                                type="password"
+                                value={localHuggingFaceKey}
+                                onChange={(e) => setLocalHuggingFaceKey(e.target.value)}
+                                className="pl-10 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                placeholder="Enter your Hugging Face API Key"
+                            />
+                        </div>
+                        <button
+                            onClick={handleSaveHuggingFaceKey}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
+                        >
+                            Save
+                        </button>
+                    </div>
+                </div>
+
+                {/* OpenRouter */}
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">OpenRouter API Key (Optional)</label>
+                    <div className="flex space-x-2">
+                        <div className="relative flex-1">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <Key className="h-5 w-5 text-gray-400" />
+                            </div>
+                            <input
+                                type="password"
+                                value={localOpenRouterKey}
+                                onChange={(e) => setLocalOpenRouterKey(e.target.value)}
+                                className="pl-10 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                                placeholder="Enter your OpenRouter API Key"
+                            />
+                        </div>
+                        <button
+                            onClick={handleSaveOpenRouterKey}
+                            className="bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-sm font-medium"
+                        >
+                            Save
+                        </button>
+                    </div>
+                </div>
+
+                {/* Firebase */}
+                <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <h4 className="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">Firebase Configuration (Push Notifications)</h4>
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">API Key</label>
+                            <input
+                                type="password"
+                                value={localFirebaseApiKey}
+                                onChange={(e) => setLocalFirebaseApiKey(e.target.value)}
+                                className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-xs"
+                                placeholder="Firebase API Key"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Project ID</label>
+                                <input
+                                    type="text"
+                                    value={localFirebaseProjectId}
+                                    onChange={(e) => setLocalFirebaseProjectId(e.target.value)}
+                                    className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-xs"
+                                    placeholder="Project ID"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">App ID</label>
+                                <input
+                                    type="text"
+                                    value={localFirebaseAppId}
+                                    onChange={(e) => setLocalFirebaseAppId(e.target.value)}
+                                    className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-xs"
+                                    placeholder="App ID"
+                                />
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Sender ID</label>
+                                <input
+                                    type="text"
+                                    value={localFirebaseMessagingSenderId}
+                                    onChange={(e) => setLocalFirebaseMessagingSenderId(e.target.value)}
+                                    className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-xs"
+                                    placeholder="Sender ID"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">VAPID Key</label>
+                                <input
+                                    type="text"
+                                    value={localFirebaseVapidKey}
+                                    onChange={(e) => setLocalFirebaseVapidKey(e.target.value)}
+                                    className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-xs"
+                                    placeholder="VAPID Public Key"
+                                />
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleSaveFirebaseConfig}
+                            className="w-full mt-2 bg-indigo-600 text-white px-4 py-2 rounded-md hover:bg-indigo-700 transition-colors text-xs font-bold uppercase tracking-widest"
+                        >
+                            Save Firebase Config
+                        </button>
+                    </div>
+                </div>
+                
+                <p className="text-[10px] text-gray-500 italic">
+                    Note: Providing your own keys overrides the system defaults. This is recommended for high-volume usage or custom integrations.
+                </p>
+            </div>
+        </section>
+
+        {/* Advanced Server-Side Configuration */}
+        <section className="bg-red-50 p-4 rounded-lg border border-red-100">
+            <h3 className="text-lg font-semibold text-red-800 mb-4 border-b border-red-200 pb-2 flex items-center">
+                <Shield className="w-5 h-5 mr-2" />
+                Advanced Server-Side Keys
+            </h3>
+            <div className="space-y-6">
+                {/* Google Drive Advanced */}
+                <div>
+                    <h4 className="text-xs font-bold text-red-700 mb-2 uppercase tracking-wider">Google Drive API (OAuth)</h4>
+                    <div className="space-y-3">
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Client ID</label>
+                            <input
+                                type="text"
+                                value={localGoogleClientId}
+                                onChange={(e) => setLocalGoogleClientId(e.target.value)}
+                                className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-xs"
+                                placeholder="Google Client ID"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Client Secret</label>
+                            <input
+                                type="password"
+                                value={localGoogleClientSecret}
+                                onChange={(e) => setLocalGoogleClientSecret(e.target.value)}
+                                className="block w-full border border-gray-300 rounded-md shadow-sm py-1 px-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-xs"
+                                placeholder="Google Client Secret"
+                            />
+                        </div>
+                        <button
+                            onClick={handleSaveGoogleConfig}
+                            className="w-full bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors text-xs font-bold uppercase tracking-widest"
+                        >
+                            Save Google Config
+                        </button>
+                    </div>
+                </div>
+
+                {/* Firebase Service Account */}
+                <div>
+                    <h4 className="text-xs font-bold text-red-700 mb-2 uppercase tracking-wider">Firebase Service Account (JSON)</h4>
+                    <p className="text-[10px] text-red-600 mb-2">Required for the server to send push notifications using your own Firebase project.</p>
+                    <textarea
+                        value={localFirebaseServiceAccountKey}
+                        onChange={(e) => setLocalFirebaseServiceAccountKey(e.target.value)}
+                        className="block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-xs h-32 font-mono"
+                        placeholder='{ "type": "service_account", ... }'
+                    />
+                    <button
+                        onClick={handleSaveFirebaseServiceAccount}
+                        className="w-full mt-2 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors text-xs font-bold uppercase tracking-widest"
+                    >
+                        Save Service Account Key
+                    </button>
+                </div>
+                
+                <p className="text-[10px] text-red-500 italic">
+                    Warning: These keys are sensitive. They are stored locally in your browser's IndexedDB and sent to the server for processing.
+                </p>
             </div>
         </section>
 

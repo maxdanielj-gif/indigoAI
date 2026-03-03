@@ -10,9 +10,11 @@ export interface Message {
 export const sendMessage = async (history: Message[], message: string, systemInstruction?: string) => {
   try {
     const chat = ai.chats.create({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-flash-preview",
       config: {
-        systemInstruction: systemInstruction || "You are a helpful AI companion.",
+        systemInstruction: (systemInstruction || "You are a helpful AI companion.") + 
+          "\n\nFACT-CHECKING PROTOCOL: Use Google Search to fact-check claims in real-time. Prevent fake news and pseudoscience. Prioritize scientific consensus.",
+        tools: [{ googleSearch: {} }],
       },
       history: history.map(msg => ({
         role: msg.role,
@@ -31,7 +33,7 @@ export const sendMessage = async (history: Message[], message: string, systemIns
 export const generateImageDescription = async (prompt: string) => {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-3-flash-preview",
       contents: `Generate a detailed description for an image based on this prompt: ${prompt}`,
     });
     return response.text;

@@ -6,6 +6,12 @@ export interface ChatSession {
   updatedAt: number;
 }
 
+export interface BackgroundImage {
+  id: string;
+  name: string;
+  url: string;
+}
+
 export interface AIProfile {
   id: string;
   name: string;
@@ -18,6 +24,11 @@ export interface AIProfile {
   voiceSpeed: number;
   autoReadMessages: boolean;
   voiceGender: 'male' | 'female' | 'none';
+  customVoiceSample?: string | null;
+  voiceDescription?: string;
+  voiceProvider?: 'gemini' | 'elevenlabs';
+  elevenLabsVoiceId?: string | null;
+  elevenLabsModelId?: string | null;
   responseLength: 'short' | 'medium' | 'long' | 'custom';
   responseDetail: 'low' | 'medium' | 'high' | 'standard';
   responseTone: 'friendly' | 'formal' | 'humorous' | 'serious';
@@ -32,11 +43,15 @@ export interface AIProfile {
   ambientMode: boolean;
   ambientFrequency: 'off' | 'very_frequently' | 'frequently' | 'occasionally' | 'rarely';
   aiCanGenerateImages: boolean;
+  imageStyle?: string;
+  llmProvider?: 'gemini' | 'openrouter' | 'huggingface';
+  openRouterModel?: string;
+  imageProvider?: 'gemini' | 'huggingface' | 'puter';
+  hfImageModel?: string;
   aiCanGenerateSpeech: boolean;
   aiCanUseTools: boolean;
   aiCanBrowse: boolean;
-  hfApiKey?: string | null;
-  hfReferenceAudioUrl?: string | null;
+  backgroundImages?: BackgroundImage[];
   chatHistory?: ChatMessage[]; // Legacy support
   sessions?: ChatSession[];
   activeSessionId?: string;
@@ -60,6 +75,7 @@ export interface ChatMessage {
   attachments?: { type: 'image' | 'text' | 'pdf'; content: string; name: string }[];
   read?: boolean;
   groundingUrls?: { title: string; url: string }[];
+  rating?: 'up' | 'down' | number; // up/down or 1-5 stars
 }
 
 export interface KnowledgeBaseDocument {

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { saveToDB, loadFromDB, clearDB } from '../services/db';
 import { onForegroundMessage, requestNotificationPermission, showNativeNotification } from '../services/firebaseService';
 import { GoogleGenAI, FunctionDeclaration, Type } from "@google/genai";
@@ -23,6 +23,17 @@ interface AppState {
   memories: Memory[];
   toasts: Toast[];
   apiKey: string | null;
+  elevenLabsApiKey: string | null;
+  huggingFaceApiKey: string | null;
+  openRouterApiKey: string | null;
+  firebaseApiKey: string | null;
+  firebaseProjectId: string | null;
+  firebaseAppId: string | null;
+  firebaseMessagingSenderId: string | null;
+  firebaseVapidKey: string | null;
+  firebaseServiceAccountKey: string | null;
+  googleClientId: string | null;
+  googleClientSecret: string | null;
   autoSaveChat: boolean;
   autoSaveChatInterval: number; // in seconds
   autoJsonBackup: boolean;
@@ -52,6 +63,7 @@ interface AppContextType extends AppState {
   addChatMessage: (message: ChatMessage) => void;
   updateChatMessage: (id: string, newContent: string) => void;
   deleteChatMessage: (id: string) => void;
+  rateChatMessage: (id: string, rating: 'up' | 'down' | number | null) => void;
   setChatHistory: (history: ChatMessage[]) => void;
   addToGallery: (item: GalleryItem) => void;
   deleteImageFromGallery: (id: string) => void;
@@ -69,6 +81,12 @@ interface AppContextType extends AppState {
   importData: (json: string) => void;
   clearHistory: () => void;
   setApiKey: (key: string | null) => void;
+  setElevenLabsApiKey: (key: string | null) => void;
+  setHuggingFaceApiKey: (key: string | null) => void;
+  setOpenRouterApiKey: (key: string | null) => void;
+  setFirebaseConfig: (config: { apiKey?: string | null; projectId?: string | null; appId?: string | null; messagingSenderId?: string | null; vapidKey?: string | null }) => void;
+  setFirebaseServiceAccountKey: (key: string | null) => void;
+  setGoogleConfig: (config: { clientId?: string | null; clientSecret?: string | null }) => void;
   showTutorial: boolean;
   setShowTutorial: (show: boolean) => void;
   setAutoSaveChat: (enabled: boolean) => void;
@@ -107,6 +125,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     voiceSpeed: 1.0,
     autoReadMessages: false,
     voiceGender: 'none',
+    voiceProvider: 'gemini',
+    elevenLabsVoiceId: null,
+    elevenLabsModelId: 'eleven_multilingual_v2',
     responseLength: 'medium',
     responseDetail: 'medium',
     responseTone: 'friendly',
@@ -121,11 +142,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ambientMode: false,
     ambientFrequency: 'off',
     aiCanGenerateImages: false,
+    llmProvider: 'gemini',
+    openRouterModel: 'meta-llama/llama-3-8b-instruct:free',
+    imageProvider: 'gemini',
+    hfImageModel: 'stabilityai/stable-diffusion-xl-base-1.0',
     aiCanGenerateSpeech: false,
     aiCanUseTools: false,
     aiCanBrowse: false,
-    hfApiKey: null,
-    hfReferenceAudioUrl: 'https://raw.githubusercontent.com/maxdanielj-gif/voice-clone/main/Kelly_2.wav',
     chatHistory: [],
     memories: [],
     journal: [],
@@ -148,6 +171,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [memories, setMemories] = useState<Memory[]>([]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [apiKey, setApiKeyState] = useState<string | null>(null);
+  const [elevenLabsApiKey, setElevenLabsApiKeyState] = useState<string | null>(null);
+  const [huggingFaceApiKey, setHuggingFaceApiKeyState] = useState<string | null>(null);
+  const [openRouterApiKey, setOpenRouterApiKeyState] = useState<string | null>(null);
+  const [firebaseApiKey, setFirebaseApiKeyState] = useState<string | null>(null);
+  const [firebaseProjectId, setFirebaseProjectIdState] = useState<string | null>(null);
+  const [firebaseAppId, setFirebaseAppIdState] = useState<string | null>(null);
+  const [firebaseMessagingSenderId, setFirebaseMessagingSenderIdState] = useState<string | null>(null);
+  const [firebaseVapidKey, setFirebaseVapidKeyState] = useState<string | null>(null);
+  const [firebaseServiceAccountKey, setFirebaseServiceAccountKeyState] = useState<string | null>(null);
+  const [googleClientId, setGoogleClientIdState] = useState<string | null>(null);
+  const [googleClientSecret, setGoogleClientSecretState] = useState<string | null>(null);
   const [autoSaveChat, setAutoSaveChatState] = useState(true);
   const [autoSaveChatInterval, setAutoSaveChatInterval] = useState(30); // Default 30 seconds
   const [autoJsonBackup, setAutoJsonBackupState] = useState(false);
@@ -178,6 +212,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     voiceSpeed: 1.0,
     autoReadMessages: false,
     voiceGender: 'none',
+    voiceProvider: 'gemini',
+    elevenLabsVoiceId: null,
+    elevenLabsModelId: 'eleven_multilingual_v2',
     responseLength: 'medium',
     responseDetail: 'medium',
     responseTone: 'friendly',
@@ -192,11 +229,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ambientMode: false,
     ambientFrequency: 'off',
     aiCanGenerateImages: false,
+    llmProvider: 'gemini',
+    openRouterModel: 'meta-llama/llama-3-8b-instruct:free',
+    imageProvider: 'gemini',
+    hfImageModel: 'stabilityai/stable-diffusion-xl-base-1.0',
     aiCanGenerateSpeech: false,
     aiCanUseTools: false,
     aiCanBrowse: false,
-    hfApiKey: null,
-    hfReferenceAudioUrl: 'https://raw.githubusercontent.com/maxdanielj-gif/voice-clone/main/Kelly_2.wav',
     chatHistory: [],
     memories: [],
     journal: [],
@@ -266,6 +305,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 setKnowledgeBase(Array.isArray(savedData.knowledgeBase) ? savedData.knowledgeBase : []);
                 setMemories(Array.isArray(savedData.memories) ? savedData.memories : []);
                 setApiKeyState(savedData.apiKey || null);
+                setElevenLabsApiKeyState(savedData.elevenLabsApiKey || null);
+                setHuggingFaceApiKeyState(savedData.huggingFaceApiKey || null);
+                setOpenRouterApiKeyState(savedData.openRouterApiKey || null);
+                setFirebaseApiKeyState(savedData.firebaseApiKey || null);
+                setFirebaseProjectIdState(savedData.firebaseProjectId || null);
+                setFirebaseAppIdState(savedData.firebaseAppId || null);
+                setFirebaseMessagingSenderIdState(savedData.firebaseMessagingSenderId || null);
+                setFirebaseVapidKeyState(savedData.firebaseVapidKey || null);
+                setFirebaseServiceAccountKeyState(savedData.firebaseServiceAccountKey || null);
+                setGoogleClientIdState(savedData.googleClientId || null);
+                setGoogleClientSecretState(savedData.googleClientSecret || null);
                 setFcmTokenState(savedData.fcmToken || null);
                 setAutoSaveChatState(savedData.autoSaveChat !== undefined ? savedData.autoSaveChat : true);
                 setAutoSaveChatInterval(savedData.autoSaveChatInterval !== undefined ? savedData.autoSaveChatInterval : 30);
@@ -353,6 +403,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           memories,
           toasts: [],
           apiKey,
+          openRouterApiKey,
+          elevenLabsApiKey,
+          huggingFaceApiKey,
+          firebaseApiKey,
+          firebaseProjectId,
+          firebaseAppId,
+          firebaseMessagingSenderId,
+          firebaseVapidKey,
+          firebaseServiceAccountKey,
+          googleClientId,
+          googleClientSecret,
           autoSaveChat,
           autoSaveChatInterval,
           autoJsonBackup,
@@ -376,14 +437,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     // Debounce save to avoid excessive writes
-  }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
+  }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, openRouterApiKey, elevenLabsApiKey, huggingFaceApiKey, firebaseApiKey, firebaseProjectId, firebaseAppId, firebaseMessagingSenderId, firebaseVapidKey, firebaseServiceAccountKey, googleClientId, googleClientSecret, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
 
   // Debounce save to avoid excessive writes
   useEffect(() => {
     if (!isLoaded) return;
     const timeoutId = setTimeout(saveData, 1000);
     return () => clearTimeout(timeoutId);
-  }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
+  }, [aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, apiKey, openRouterApiKey, elevenLabsApiKey, huggingFaceApiKey, firebaseApiKey, firebaseProjectId, firebaseAppId, firebaseMessagingSenderId, firebaseVapidKey, firebaseServiceAccountKey, googleClientId, googleClientSecret, fcmToken, autoSaveChat, autoJsonBackup, autoDriveBackup, isLoaded, isGoogleDriveConnected, lastInteractionTime]);
 
   // Initialize Firebase and handle foreground messages
   useEffect(() => {
@@ -471,6 +532,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 memories,
                 toasts: [],
                 apiKey,
+                elevenLabsApiKey,
+                huggingFaceApiKey,
+                openRouterApiKey,
+                firebaseApiKey,
+                firebaseProjectId,
+                firebaseAppId,
+                firebaseMessagingSenderId,
+                firebaseVapidKey,
+                firebaseServiceAccountKey,
+                googleClientId,
+                googleClientSecret,
                 autoSaveChat,
                 autoSaveChatInterval,
                 autoJsonBackup,
@@ -527,7 +599,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }, null, 2);
             
             const now = new Date();
-            const filename = `indigoAI_backup_${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}.json`;
+            const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}`;
+            const filename = `indigoAI_${aiProfile.id}_backup_${timestamp}.json`;
             
             // Simulate saving to a file. In a real app, this would trigger a file download or server-side save.
             console.log(`Auto-backup triggered: Would save as file '${filename}'`);
@@ -556,6 +629,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           knowledgeBase,
           memories,
           apiKey,
+          elevenLabsApiKey,
+          huggingFaceApiKey,
+          firebaseApiKey,
+          firebaseProjectId,
+          firebaseAppId,
+          firebaseMessagingSenderId,
+          firebaseVapidKey,
+          firebaseServiceAccountKey,
+          googleClientId,
+          googleClientSecret,
+          fcmToken,
           autoSaveChat,
           autoSaveChatInterval,
           autoJsonBackup,
@@ -564,22 +648,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           isGoogleDriveConnected,
           proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
           notificationsEnabled,
+          showTimestamps,
           timeZone,
-        }, null, 2);
+          activeSessionId,
+      }, null, 2);
 
         const now = new Date();
-        const filename = `indigoAI_drive_backup_${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}.json`;
+        const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}`;
+        const filename = `indigoAI_${aiProfile.id}_drive_backup_${timestamp}.json`;
 
         const res = await fetch('/api/drive/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename, content: data }),
+          body: JSON.stringify({ 
+            filename, 
+            content: data,
+            clientId: googleClientId || undefined,
+            clientSecret: googleClientSecret || undefined
+          }),
         });
 
         if (res.ok) {
           console.log(`Auto-backed up to Google Drive (filename: ${filename})`);
         } else {
-          console.error("Failed to auto-backup to Google Drive", await res.json());
+          let errorData;
+          const contentType = res.headers.get("content-type");
+          if (contentType && contentType.includes("application/json")) {
+            errorData = await res.json();
+          } else {
+            errorData = { error: await res.text() };
+          }
+          console.error("Failed to auto-backup to Google Drive", errorData);
         }
       } catch (e) {
         console.error("Failed to auto-backup to Google Drive", e);
@@ -632,11 +731,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               apiKey: apiKey || undefined,
               fcmToken: fcmToken || undefined,
               timeZone,
+              firebaseServiceAccountKey: firebaseServiceAccountKey || undefined
             }),
           });
 
           if (res.ok) {
-            const { message, generatedImage } = await res.json();
+            const data = await res.json();
+            const { message, generatedImage } = data;
             
             if (generatedImage) {
               const imageUrl = `data:image/png;base64,${generatedImage}`;
@@ -666,10 +767,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             
             setLastInteractionTime(Date.now());
           } else {
-            console.error("Failed to generate proactive message:", await res.json());
+            let errorData;
+            const contentType = res.headers.get("content-type");
+            if (contentType && contentType.includes("application/json")) {
+              errorData = await res.json();
+            } else {
+              errorData = { error: await res.text() };
+            }
+            console.error("Failed to generate proactive message:", errorData);
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error("Error sending proactive message:", e);
+          if (e.message?.includes("Requested entity was not found")) {
+            window.dispatchEvent(new CustomEvent('aistudio:reset-key'));
+          }
         }
       }
     };
@@ -850,6 +961,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const rateChatMessage = (id: string, rating: 'up' | 'down' | number | null) => {
+    setChatHistory(prev => {
+        const newHistory = prev.map(m => m.id === id ? { ...m, rating: rating === null ? undefined : rating } : m);
+        // Update active session
+        setSessions(sPrev => sPrev.map(s => 
+            s.id === activeSessionId 
+                ? { ...s, messages: newHistory, updatedAt: Date.now() } 
+                : s
+        ));
+        return newHistory;
+    });
+  };
+
   const addToGallery = (item: GalleryItem) => {
     setGallery(prev => [item, ...prev]);
   };
@@ -901,10 +1025,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const setApiKey = (key: string | null) => {
-      setApiKeyState(key);
-  };
-
   const setFcmToken = (token: string | null) => {
     setFcmTokenState(token);
   };
@@ -920,16 +1040,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       knowledgeBase,
       memories,
       apiKey,
+      elevenLabsApiKey,
+      huggingFaceApiKey,
+      openRouterApiKey,
+      firebaseApiKey,
+      firebaseProjectId,
+      firebaseAppId,
+      firebaseMessagingSenderId,
+      firebaseVapidKey,
+      firebaseServiceAccountKey,
+      googleClientId,
+      googleClientSecret,
       fcmToken,
+      autoSaveChat,
       autoSaveChatInterval,
+      autoJsonBackup,
       autoJsonBackupInterval,
       autoDriveBackup,
       isGoogleDriveConnected,
       proactiveMessageFrequency: aiProfile.proactiveMessageFrequency,
       notificationsEnabled,
       showTimestamps,
-      aiCanGenerateImages: aiProfile.aiCanGenerateImages,
       timeZone,
+      activeSessionId,
     }, null, 2);
   };
 
@@ -945,6 +1078,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setKnowledgeBase(parsed.knowledgeBase || []);
       setMemories(parsed.memories || []);
       setApiKeyState(parsed.apiKey || null);
+      setElevenLabsApiKeyState(parsed.elevenLabsApiKey || null);
+      setHuggingFaceApiKeyState(parsed.huggingFaceApiKey || null);
+      setOpenRouterApiKeyState(parsed.openRouterApiKey || null);
+      setFirebaseApiKeyState(parsed.firebaseApiKey || null);
+      setFirebaseProjectIdState(parsed.firebaseProjectId || null);
+      setFirebaseAppIdState(parsed.firebaseAppId || null);
+      setFirebaseMessagingSenderIdState(parsed.firebaseMessagingSenderId || null);
+      setFirebaseVapidKeyState(parsed.firebaseVapidKey || null);
+      setFirebaseServiceAccountKeyState(parsed.firebaseServiceAccountKey || null);
+      setGoogleClientIdState(parsed.googleClientId || null);
+      setGoogleClientSecretState(parsed.googleClientSecret || null);
       setFcmTokenState(parsed.fcmToken || null);
       setAutoSaveChatInterval(parsed.autoSaveChatInterval !== undefined ? parsed.autoSaveChatInterval : 30);
       setAutoJsonBackupInterval(parsed.autoJsonBackupInterval !== undefined ? parsed.autoJsonBackupInterval : 5);
@@ -1015,6 +1159,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSessions(prev => prev.map(s => s.id === activeSessionId ? { ...s, messages: [], updatedAt: Date.now() } : s));
   };
 
+  const setApiKey = (key: string | null) => setApiKeyState(key);
+  const setElevenLabsApiKey = (key: string | null) => setElevenLabsApiKeyState(key);
+  const setHuggingFaceApiKey = (key: string | null) => setHuggingFaceApiKeyState(key);
+  const setOpenRouterApiKey = (key: string | null) => setOpenRouterApiKeyState(key);
+  const setFirebaseConfig = (config: { apiKey?: string | null; projectId?: string | null; appId?: string | null; messagingSenderId?: string | null; vapidKey?: string | null }) => {
+    if (config.apiKey !== undefined) setFirebaseApiKeyState(config.apiKey);
+    if (config.projectId !== undefined) setFirebaseProjectIdState(config.projectId);
+    if (config.appId !== undefined) setFirebaseAppIdState(config.appId);
+    if (config.messagingSenderId !== undefined) setFirebaseMessagingSenderIdState(config.messagingSenderId);
+    if (config.vapidKey !== undefined) setFirebaseVapidKeyState(config.vapidKey);
+  };
+
+  const setFirebaseServiceAccountKey = (key: string | null) => setFirebaseServiceAccountKeyState(key);
+  const setGoogleConfig = (config: { clientId?: string | null; clientSecret?: string | null }) => {
+    if (config.clientId !== undefined) setGoogleClientIdState(config.clientId);
+    if (config.clientSecret !== undefined) setGoogleClientSecretState(config.clientSecret);
+  };
+
   const resetApp = async () => {
       try {
           await clearDB();
@@ -1044,37 +1206,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
   };
 
+  const contextValue = useMemo(() => ({
+    aiProfile, setAIProfile, savePersona, deletePersona, loadPersona,
+    savedPersonas,
+    userProfile, setUserProfile, setUserReferenceImage,
+    chatHistory, addChatMessage, updateChatMessage, deleteChatMessage, rateChatMessage, setChatHistory,
+    gallery, addToGallery, deleteImageFromGallery,
+    journal, addJournalEntry, updateJournalEntry, deleteJournalEntry,
+    knowledgeBase, addToKnowledgeBase,
+    memories, addMemory, updateMemory, deleteMemory,
+    toasts, addToast, removeToast,
+    resetApp, exportData, importData, clearHistory,
+    apiKey, setApiKey,
+    elevenLabsApiKey, setElevenLabsApiKey,
+    huggingFaceApiKey, setHuggingFaceApiKey,
+    openRouterApiKey, setOpenRouterApiKey,
+    firebaseApiKey, firebaseProjectId, firebaseAppId, firebaseMessagingSenderId, firebaseVapidKey, setFirebaseConfig,
+    firebaseServiceAccountKey, setFirebaseServiceAccountKey,
+    googleClientId, googleClientSecret, setGoogleConfig,
+    fcmToken, setFcmToken,
+    showTutorial, setShowTutorial,
+    autoSaveChat, setAutoSaveChat,
+    autoSaveChatInterval, setAutoSaveChatInterval,
+    autoJsonBackup, setAutoJsonBackup,
+    autoJsonBackupInterval, setAutoJsonBackupInterval,
+    notificationsEnabled, setNotificationsEnabled,
+    autoDriveBackup, setAutoDriveBackup,
+    isGoogleDriveConnected, setIsGoogleDriveConnected,
+    showTimestamps, setShowTimestamps: setShowTimestampsState,
+    proactiveMessageFrequency: aiProfile.proactiveMessageFrequency, setProactiveMessageFrequency,
+    ambientMode: aiProfile.ambientMode, setAmbientMode: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, ambientMode: enabled })),
+    ambientFrequency: aiProfile.ambientFrequency, setAmbientFrequency: (frequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off') => setAIProfileState(prev => ({ ...prev, ambientFrequency: frequency })),
+    aiCanGenerateImages: aiProfile.aiCanGenerateImages, setAiCanGenerateImages: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, aiCanGenerateImages: enabled })),
+    timeZone, setTimeZone,
+    sessions, activeSessionId,
+    createNewSession, switchSession, deleteSession, renameSession,
+  }), [
+    aiProfile, savedPersonas, userProfile, chatHistory, gallery, journal, knowledgeBase, memories, toasts, apiKey, elevenLabsApiKey, huggingFaceApiKey, openRouterApiKey, firebaseApiKey, firebaseProjectId, firebaseAppId, firebaseMessagingSenderId, firebaseVapidKey, firebaseServiceAccountKey, googleClientId, googleClientSecret, fcmToken, showTutorial, autoSaveChat, autoSaveChatInterval, autoJsonBackup, autoJsonBackupInterval, notificationsEnabled, autoDriveBackup, isGoogleDriveConnected, showTimestamps, timeZone, sessions, activeSessionId
+  ]);
+
   return (
-    <AppContext.Provider value={{
-      aiProfile, setAIProfile, savePersona, deletePersona, loadPersona,
-      savedPersonas,
-      userProfile, setUserProfile, setUserReferenceImage,
-      chatHistory, addChatMessage, updateChatMessage, deleteChatMessage, setChatHistory,
-      gallery, addToGallery, deleteImageFromGallery,
-      journal, addJournalEntry, updateJournalEntry, deleteJournalEntry,
-      knowledgeBase, addToKnowledgeBase,
-      memories, addMemory, updateMemory, deleteMemory,
-      toasts, addToast, removeToast,
-      resetApp, exportData, importData, clearHistory,
-      apiKey, setApiKey,
-      fcmToken, setFcmToken,
-      showTutorial, setShowTutorial,
-      autoSaveChat, setAutoSaveChat,
-      autoSaveChatInterval, setAutoSaveChatInterval,
-      autoJsonBackup, setAutoJsonBackup,
-      autoJsonBackupInterval, setAutoJsonBackupInterval,
-      notificationsEnabled, setNotificationsEnabled,
-      autoDriveBackup, setAutoDriveBackup,
-      isGoogleDriveConnected, setIsGoogleDriveConnected,
-      showTimestamps, setShowTimestamps: setShowTimestampsState,
-      proactiveMessageFrequency: aiProfile.proactiveMessageFrequency, setProactiveMessageFrequency,
-      ambientMode: aiProfile.ambientMode, setAmbientMode: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, ambientMode: enabled })),
-      ambientFrequency: aiProfile.ambientFrequency, setAmbientFrequency: (frequency: 'very_frequently' | 'frequently' | 'occasionally' | 'rarely' | 'off') => setAIProfileState(prev => ({ ...prev, ambientFrequency: frequency })),
-      aiCanGenerateImages: aiProfile.aiCanGenerateImages, setAiCanGenerateImages: (enabled: boolean) => setAIProfileState(prev => ({ ...prev, aiCanGenerateImages: enabled })),
-      timeZone, setTimeZone,
-      sessions, activeSessionId,
-      createNewSession, switchSession, deleteSession, renameSession,
-    }}>
+    <AppContext.Provider value={contextValue}>
       {children}
     </AppContext.Provider>
   );

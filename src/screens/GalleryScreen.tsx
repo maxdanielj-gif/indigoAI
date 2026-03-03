@@ -92,7 +92,7 @@ const GalleryScreen: React.FC = () => {
           {filteredGallery.map((item) => (
             <div key={item.id} className="bg-gray-100 rounded-lg shadow-sm hover:shadow-md transition-shadow flex flex-col">
                 <div className="aspect-square overflow-hidden rounded-t-lg">
-                    <img src={item.url} alt="Gallery Item" className="w-full h-full object-cover" />
+                    <img src={item.url} alt="Gallery Item" className="w-full h-full object-cover" loading="lazy" />
                 </div>
                 <div className="flex items-center justify-center space-x-2 p-2 bg-gray-50 border-t border-gray-200">
                     <a 
