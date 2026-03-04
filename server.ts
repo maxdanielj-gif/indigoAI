@@ -370,7 +370,7 @@ app.post("/api/generate-image", async (req, res) => {
               mimeType
             }
           });
-          parts[1].text = `${prompt}${stylePrompt} (Please base the generated image on the provided reference image of the persona)`;
+          parts[parts.length - 1].text = `${prompt}${stylePrompt} (The first image is the reference for the character. Please base the generated image on this reference image of the persona.)`;
         } catch (e) {
           console.error("Error parsing reference image:", e);
         }
@@ -392,7 +392,7 @@ app.post("/api/generate-image", async (req, res) => {
               // Update prompt to mention the background reference
               const lastPart = parts[parts.length - 1];
               if (lastPart.text) {
-                lastPart.text += ` (Please use the provided image of the ${bg.name} as the background reference to maintain consistency)`;
+                lastPart.text += ` (The second image is the background reference. Please use this image of the ${bg.name} as the background reference to maintain consistency. Do not modify the background.)`;
               }
               break; // Only use one background reference for now
             } catch (e) {
@@ -549,6 +549,8 @@ app.post("/api/proactive-message", async (req, res) => {
       },
     });
 
+    console.log("Proactive message generation result:", JSON.stringify(result));
+
     let message = result.text;
     let generatedImage: string | undefined;
 
@@ -571,7 +573,7 @@ app.post("/api/proactive-message", async (req, res) => {
                     mimeType
                   }
                 });
-                parts[1].text = `${call.args?.prompt}${stylePrompt} (Please base the generated image on the provided reference image of the persona)`;
+                parts[parts.length - 1].text = `${call.args?.prompt}${stylePrompt} (The first image is the reference for the character. Please base the generated image on this reference image of the persona.)`;
               } catch (e) {
                 console.error("Error parsing reference image in proactive message:", e);
               }
@@ -594,7 +596,7 @@ app.post("/api/proactive-message", async (req, res) => {
                     // Update prompt to mention the background reference
                     const lastPart = parts[parts.length - 1];
                     if (lastPart.text) {
-                      lastPart.text += ` (Please use the provided image of the ${bg.name} as the background reference to maintain consistency)`;
+                      lastPart.text += ` (The second image is the background reference. Please use this image of the ${bg.name} as the background reference to maintain consistency. Do not modify the background.)`;
                     }
                     break;
                   } catch (e) {
@@ -642,33 +644,20 @@ app.post("/api/proactive-message", async (req, res) => {
     // Send push notification if fcmToken is provided
     if (fcmToken) {
       try {
-        let messaging;
-        if (firebaseServiceAccountKey) {
-          const sa = JSON.parse(firebaseServiceAccountKey);
-          const appName = `app-${Date.now()}`;
-          const customApp = admin.initializeApp({
-            credential: admin.credential.cert(sa)
-          }, appName);
-          messaging = customApp.messaging();
-        } else if (firebaseServiceAccount) {
-          messaging = admin.messaging();
-        }
-
-        if (messaging) {
-          await messaging.send({
-            notification: {
-              title: aiProfile.name,
-              body: message,
-            },
-            data: {
-              type: 'chat',
-              aiName: aiProfile.name,
-              hasImage: generatedImage ? 'true' : 'false'
-            },
-            token: fcmToken,
-          });
-          console.log("Push notification sent successfully.");
-        }
+        const messaging = admin.messaging();
+        await messaging.send({
+          notification: {
+            title: aiProfile.name,
+            body: message,
+          },
+          data: {
+            type: 'chat',
+            aiName: aiProfile.name,
+            hasImage: generatedImage ? 'true' : 'false'
+          },
+          token: fcmToken,
+        });
+        console.log("Push notification sent successfully.");
       } catch (fcmError: any) {
         console.error("Error sending FCM notification:", fcmError.message || fcmError);
       }
