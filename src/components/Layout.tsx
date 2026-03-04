@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { MessageSquare, User, Brain, Image as ImageIcon, Book, Settings, Camera, Menu, X, BookOpen } from 'lucide-react';
+import { MessageSquare, User, Brain, Image as ImageIcon, Book, Settings, Camera, Menu, X, BookOpen, History as HistoryIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ToastContainer from './ToastContainer';
 
@@ -10,6 +10,7 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   const navItems = [
     { path: '/chat', icon: MessageSquare, label: 'Chat' },
+    { path: '/history', icon: HistoryIcon, label: 'History' },
     { path: '/ai-profile', icon: Brain, label: 'AI Persona' },
     { path: '/user-profile', icon: User, label: 'User Profile' },
     { path: '/memory', icon: Book, label: 'Memory' },

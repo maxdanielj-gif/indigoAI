@@ -340,7 +340,9 @@ const SettingsScreen: React.FC = () => {
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = url;
-      a.download = `indigo-ai-backup-${new Date().toISOString().split('T')[0]}.json`;
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}`;
+      a.download = `indigoAI_${aiProfile.id}_backup_${timestamp}.json`;
       document.body.appendChild(a);
       a.click();
       setTimeout(() => {
@@ -435,7 +437,9 @@ const SettingsScreen: React.FC = () => {
     addToast({ title: "Google Drive Backup", message: "Initiating manual backup to Google Drive...", type: "info" });
     try {
       const data = await exportData();
-      const filename = `indigo-ai-backup-${new Date().toISOString().split('T')[0]}-${Date.now()}.json`;
+      const now = new Date();
+      const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}`;
+      const filename = `indigoAI_${aiProfile.id}_backup_${timestamp}.json`;
       const res = await fetch('/api/drive/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

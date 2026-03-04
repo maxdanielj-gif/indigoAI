@@ -4,6 +4,7 @@ import KeySelectionGuard from './components/KeySelectionGuard';
 import Layout from './components/Layout';
 import KeepAlive from './components/KeepAlive';
 import ChatScreen from './screens/ChatScreen';
+import HistoryScreen from './screens/HistoryScreen';
 import AIProfileScreen from './screens/AIProfileScreen';
 import UserProfileScreen from './screens/UserProfileScreen';
 import MemoryScreen from './screens/MemoryScreen';
@@ -22,6 +23,7 @@ const App: React.FC = () => {
             <Routes>
               <Route path="/" element={<ChatScreen />} />
               <Route path="/chat" element={<ChatScreen />} />
+              <Route path="/history" element={<HistoryScreen />} />
               <Route path="/ai-profile" element={<AIProfileScreen />} />
               <Route path="/user-profile" element={<UserProfileScreen />} />
               <Route path="/memory" element={<MemoryScreen />} />

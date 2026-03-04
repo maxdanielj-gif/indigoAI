@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink, Plus, MessageSquare, History, MoreVertical, ChevronLeft, ChevronRight, Search, Star } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Send, Image as ImageIcon, Mic, Paperclip, Volume2, RotateCcw, Edit2, X, FileText, CheckCheck, Loader2, Camera, Trash2, ExternalLink, Plus, MessageSquare, History, MoreVertical, ChevronLeft, ChevronRight, Search, Star, Headphones } from 'lucide-react';
 import { GoogleGenAI, Modality, LiveServerMessage } from "@google/genai";
 
 // Utility function to convert base64 to ArrayBuffer
@@ -38,6 +39,14 @@ const ChatScreen: React.FC = () => {
   const [isSessionsSidebarOpen, setIsSessionsSidebarOpen] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [newSessionTitle, setNewSessionTitle] = useState('');
+  const [isHandsFree, setIsHandsFree] = useState(false);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = useRef<any>(null);
+  const inputRef = useRef('');
+
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
 
   const [readMessages, setReadMessages] = useState<Set<string>>(new Set());
   const [isLiveApiActive, setIsLiveApiActive] = useState(false);
@@ -162,8 +171,13 @@ const ChatScreen: React.FC = () => {
   };
 
   // Speech to Text
-  const toggleListening = () => {
+  const toggleListening = (forceHandsFree?: boolean) => {
+    const activeHandsFree = forceHandsFree ?? isHandsFree;
+
     if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
       setIsListening(false);
       return;
     }
@@ -171,24 +185,60 @@ const ChatScreen: React.FC = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
-      recognition.continuous = false;
+      recognitionRef.current = recognition;
+      recognition.continuous = activeHandsFree;
+      recognition.interimResults = activeHandsFree;
       recognition.lang = 'en-US';
+      
       recognition.onstart = () => setIsListening(true);
-      recognition.onend = () => setIsListening(false);
+      recognition.onend = () => {
+        setIsListening(false);
+        // If hands-free is still active and we're not loading, restart if it stopped unexpectedly
+        if (activeHandsFree && !isLoading && !isLiveApiActive) {
+            // Only restart if it's not a manual stop
+            // We'll handle restarting after AI speaks in speakMessage
+        }
+      };
+      
       recognition.onerror = (event: any) => {
         console.error("Speech recognition error", event.error);
         setIsListening(false);
         if (event.error === 'not-allowed') {
             alert("Microphone access denied. Please enable permissions.");
+            setIsHandsFree(false);
         }
       };
+
       recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInput((prev) => prev + ' ' + transcript);
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          } else {
+            interimTranscript += event.results[i][0].transcript;
+          }
+        }
+
+        if (finalTranscript) {
+          setInput((prev) => prev + ' ' + finalTranscript);
+          
+          if (activeHandsFree) {
+            // Reset silence timer
+            if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+            silenceTimerRef.current = setTimeout(() => {
+              handleSend(inputRef.current);
+              recognition.stop();
+            }, 2000); // 2 seconds of silence to send
+          }
+        }
       };
+
       recognition.start();
     } else {
       alert('Speech recognition not supported in this browser.');
+      setIsHandsFree(false);
     }
   };
 
@@ -457,6 +507,9 @@ const ChatScreen: React.FC = () => {
                     source.start(0);
                     source.onended = () => {
                         setReadMessages(prev => new Set(prev).add(messageId));
+                        if (isHandsFree) {
+                            setTimeout(() => toggleListening(true), 500);
+                        }
                     };
                 } catch (audioError) {
                     console.error("Audio playback error:", audioError);
@@ -491,6 +544,13 @@ const ChatScreen: React.FC = () => {
     utterance.pitch = aiProfile.voicePitch || 1.0;
     utterance.rate = aiProfile.voiceSpeed || 1.0;
 
+    utterance.onend = () => {
+        setReadMessages(prev => new Set(prev).add(messageId));
+        if (isHandsFree) {
+            setTimeout(() => toggleListening(true), 500);
+        }
+    };
+
     window.speechSynthesis.speak(utterance);
   };
 
@@ -498,8 +558,9 @@ const ChatScreen: React.FC = () => {
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSend = async () => {
-    if ((!input.trim() && attachments.length === 0) || isLoading) return;
+  const handleSend = async (overrideInput?: string) => {
+    const currentInput = overrideInput !== undefined ? overrideInput : input;
+    if ((!currentInput.trim() && attachments.length === 0) || isLoading) return;
 
     // Auto-save images to gallery
     attachments.forEach(att => {
@@ -517,7 +578,7 @@ const ChatScreen: React.FC = () => {
     const userMessage = {
       id: userMsgId,
       role: 'user' as const,
-      content: input,
+      content: currentInput,
       timestamp: Date.now(),
       attachments: [...attachments],
     };
@@ -625,7 +686,7 @@ const ChatScreen: React.FC = () => {
 
       addChatMessage(modelMessage);
       
-      if (aiProfile.autoReadMessages) {
+      if (aiProfile.autoReadMessages || isHandsFree) {
         speakMessage(responseText, modelMessage.id);
       } else {
         setReadMessages(prev => new Set(prev).add(modelMessage.id));
@@ -911,10 +972,13 @@ const ChatScreen: React.FC = () => {
                 ))}
             </div>
             
-            <div className="p-4 border-t border-gray-800 text-xs text-gray-500 flex items-center justify-center">
+            <Link 
+                to="/history"
+                className="p-4 border-t border-gray-800 text-xs text-gray-500 flex items-center justify-center hover:bg-gray-800 transition-colors"
+            >
                 <History className="w-3 h-3 mr-2" />
                 {sessions.length} Conversations
-            </div>
+            </Link>
         </div>
       </div>
 
@@ -939,6 +1003,8 @@ const ChatScreen: React.FC = () => {
                         {sessions.find(s => s.id === activeSessionId)?.title || 'Chat'}
                     </p>
                 </div>
+            </div>
+            <div className="flex space-x-4 items-center">
                 <button
                     onClick={handleCamera}
                     className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-full transition-colors"
@@ -973,14 +1039,33 @@ const ChatScreen: React.FC = () => {
                 >
                     <ImageIcon className="w-4 h-4" />
                 </button>
-            </div>
-            <div className="flex space-x-2 items-center">
                 <button
                   onClick={() => setIsLiveApiActive(prev => !prev)}
                   className={`p-2 rounded-full ${isLiveApiActive ? 'bg-red-500 text-white hover:bg-red-600' : 'text-indigo-600 hover:bg-indigo-100'}`}
                   title={isLiveApiActive ? 'Deactivate Live Conversation' : 'Activate Live Conversation'}
                 >
                   <Mic className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                      const newState = !isHandsFree;
+                      setIsHandsFree(newState);
+                      if (newState) {
+                          addToast({
+                              title: "Hands-Free Mode Active",
+                              message: "I'll listen continuously and send when you stop talking. I'll also read my responses aloud.",
+                              type: 'success'
+                          });
+                          // Start listening
+                          if (!isListening) toggleListening(true);
+                      } else {
+                          if (isListening) toggleListening(false);
+                      }
+                  }}
+                  className={`p-2 rounded-full ${isHandsFree ? 'bg-indigo-600 text-white' : 'text-indigo-600 hover:bg-indigo-100'}`}
+                  title={isHandsFree ? 'Deactivate Hands-Free' : 'Activate Hands-Free'}
+                >
+                  <Headphones className="w-4 h-4" />
                 </button>
                 <button
                 onClick={handleClear}
@@ -1070,7 +1155,7 @@ const ChatScreen: React.FC = () => {
         )}
         
         <div className="flex items-end space-x-2 bg-gray-50 p-2 rounded-xl border border-gray-200 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
-          <div className="flex space-x-1 pb-2">
+          <div className="flex space-x-2 pb-2">
             <input 
                 type="file" 
                 ref={imageInputRef} 
@@ -1108,7 +1193,7 @@ const ChatScreen: React.FC = () => {
                 <Paperclip className="w-5 h-5" />
             </button>
             <button 
-                onClick={toggleListening} 
+                onClick={() => toggleListening()} 
                 className={`p-2 transition-colors rounded-full hover:bg-gray-200 ${isListening ? 'text-red-500 animate-pulse' : 'text-gray-400 hover:text-indigo-600'}`}
                 title="Voice Input"
             >
@@ -1152,7 +1237,7 @@ const ChatScreen: React.FC = () => {
           </div>
           
           <button
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={isLoading || isUploading || (!input.trim() && attachments.length === 0)}
             className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-1"
           >

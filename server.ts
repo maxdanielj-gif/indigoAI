@@ -4,6 +4,7 @@ import { google } from "googleapis";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import path from "path";
+import fs from "fs";
 import { fileURLToPath } from "url";
 
 dotenv.config();
@@ -738,9 +739,25 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static("dist"));
+    // In production, serve from the built dist folder
+    // The dist folder is usually in the root, while the server might be in dist-server/
+    const distPathFromRoot = path.resolve(process.cwd(), "dist");
+    const distPathRelative = path.resolve(__dirname, "dist");
+    const distPathParent = path.resolve(__dirname, "..", "dist");
+    
+    let finalDistPath = distPathFromRoot;
+    if (fs.existsSync(distPathFromRoot)) {
+      finalDistPath = distPathFromRoot;
+    } else if (fs.existsSync(distPathRelative)) {
+      finalDistPath = distPathRelative;
+    } else if (fs.existsSync(distPathParent)) {
+      finalDistPath = distPathParent;
+    }
+
+    console.log(`Serving static files from: ${finalDistPath}`);
+    app.use(express.static(finalDistPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.resolve(__dirname, "dist", "index.html"));
+      res.sendFile(path.resolve(finalDistPath, "index.html"));
     });
   }
 

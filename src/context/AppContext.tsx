@@ -655,7 +655,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const now = new Date();
         const timestamp = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}_${now.getHours().toString().padStart(2, '0')}_${now.getMinutes().toString().padStart(2, '0')}_${now.getSeconds().toString().padStart(2, '0')}`;
-        const filename = `indigoAI_${aiProfile.id}_drive_backup_${timestamp}.json`;
+        const filename = `indigoAI_${aiProfile.id}_backup_${timestamp}.json`;
 
         const res = await fetch('/api/drive/upload', {
           method: 'POST',
